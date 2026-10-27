@@ -25,21 +25,33 @@ const server = http.createServer(app);
 
 const allowedOrigins = config.getAllowedOrigins();
 
+// Helper to test allowed origins (supports exact matches and wildcards like https://*.vercel.app)
+function isOriginAllowed(origin, allowedList, isDev) {
+  if (!origin) return true;
+  const clean = origin.replace(/\/$/, '');
+
+  if (isDev && (clean.startsWith('http://localhost:') || clean.startsWith('http://127.0.0.1:'))) {
+    return true;
+  }
+
+  return allowedList.some(allowed => {
+    if (!allowed) return false;
+    const cleanAllowed = allowed.trim().replace(/\/$/, '');
+    if (cleanAllowed === clean || cleanAllowed === '*') return true;
+    if (cleanAllowed.includes('*')) {
+      const regex = new RegExp('^' + cleanAllowed.replace(/\./g, '\\.').replace(/\*/g, '.*') + '$', 'i');
+      return regex.test(clean);
+    }
+    return false;
+  });
+}
+
 // CORS configuration supporting credentials and separate domains
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow non-browser agents (cURL, mobile, server-to-server tests)
-    if (!origin) return callback(null, true);
-
-    const cleanOrigin = origin.replace(/\/$/, '');
-    if (
-      allowedOrigins.includes(cleanOrigin) ||
-      (config.nodeEnv === 'development' && cleanOrigin.startsWith('http://localhost:')) ||
-      (config.nodeEnv === 'development' && cleanOrigin.startsWith('http://127.0.0.1:'))
-    ) {
-      return callback(null, cleanOrigin);
+    if (isOriginAllowed(origin, allowedOrigins, config.nodeEnv === 'development')) {
+      return callback(null, origin || true);
     }
-
     return callback(new Error(`CORS policy blocked access from origin: ${origin}`));
   },
   credentials: true,
@@ -53,14 +65,8 @@ app.use(express.json({ limit: '1mb' }));
 const io = new Server(server, {
   cors: {
     origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      const cleanOrigin = origin.replace(/\/$/, '');
-      if (
-        allowedOrigins.includes(cleanOrigin) ||
-        (config.nodeEnv === 'development' && cleanOrigin.startsWith('http://localhost:')) ||
-        (config.nodeEnv === 'development' && cleanOrigin.startsWith('http://127.0.0.1:'))
-      ) {
-        return callback(null, cleanOrigin);
+      if (isOriginAllowed(origin, allowedOrigins, config.nodeEnv === 'development')) {
+        return callback(null, origin || true);
       }
       return callback(new Error(`Socket.IO blocked origin: ${origin}`));
     },
