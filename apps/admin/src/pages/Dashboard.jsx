@@ -13,25 +13,34 @@ import {
   HeartPulse,
   FileText,
   Clock,
-  ArrowRight
+  ArrowRight,
+  AlertOctagon,
+  Volume2,
+  Play,
+  Pause,
+  FastForward
 } from 'lucide-react';
 import { useSocket } from '../context/SocketContext';
 import MiniFacilityMap from '../components/MiniFacilityMap';
 import ConfirmationModal from '../components/ConfirmationModal';
+import CommunicationMonitor from '../components/CommunicationMonitor';
 import { SIMULATOR_URL } from '../config';
 
 export default function Dashboard({ onNavigateTab }) {
-  const { state, commandGate, ackIncident, broadcastAnnouncement } = useSocket();
+  const { state, commandGate, ackIncident, broadcastAnnouncement, activateLockdown, releaseLockdown, controlClock } = useSocket();
   const [selectedGate, setSelectedGate] = useState(null);
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', action: null, isDanger: true });
   const [announcementModal, setAnnouncementModal] = useState(false);
   const [announcementTitle, setAnnouncementTitle] = useState('');
   const [announcementMsg, setAnnouncementMsg] = useState('');
+  const [announcementZones, setAnnouncementZones] = useState(['ALL']);
 
   const gatesList = state?.gates ? Object.values(state.gates) : [];
   const incidents = state?.incidents || [];
   const recentActivities = state?.recentActivity || [];
   const controllers = state?.controllers ? Object.values(state.controllers) : [];
+  const isLockdown = state?.lockdown?.isActive;
+  const simClock = state?.simulationClock;
 
   const openGatesCount = gatesList.filter(g => g.state === 'OPEN' || g.state === 'OPENING').length;
   const criticalIncidentsCount = incidents.filter(i => i.severity === 'CRITICAL' && i.status === 'ACTIVE').length;
@@ -41,15 +50,23 @@ export default function Dashboard({ onNavigateTab }) {
     setConfirmModal({
       isOpen: true,
       title: 'EMERGENCY FACILITY LOCKDOWN',
-      message: 'This will immediately command all perimeter gates, corridor blast barriers, and cell blocks to lock. Security alarms will activate across all sectors.',
+      message: 'This will immediately command all perimeter gates, corridor blast barriers, and cell blocks to lock. Security alarms will activate across all sectors. Real-time telemetry will stream to all connected nodes.',
       isDanger: true,
       action: async () => {
-        for (const gate of gatesList) {
-          if (gate.state !== 'CLOSED') {
-            await commandGate(gate.id, 'CLOSE').catch(() => {});
-          }
-        }
-        await broadcastAnnouncement('FACILITY LOCKDOWN ENGAGED', 'All personnel return to quarters. Emergency lockdown sequence active.').catch(() => {});
+        await activateLockdown({ scope: 'FULL_FACILITY' });
+        setConfirmModal({ isOpen: false });
+      }
+    });
+  };
+
+  const handleLockdownRelease = () => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'RELEASE EMERGENCY LOCKDOWN',
+      message: 'Are you sure you want to release emergency facility lockdown? Normal security postures, door permissions, and daily routines will resume.',
+      isDanger: false,
+      action: async () => {
+        await releaseLockdown();
         setConfirmModal({ isOpen: false });
       }
     });
@@ -72,7 +89,7 @@ export default function Dashboard({ onNavigateTab }) {
   const handleAnnouncementSubmit = async (e) => {
     e.preventDefault();
     if (!announcementTitle.trim()) return;
-    await broadcastAnnouncement(announcementTitle, announcementMsg);
+    await broadcastAnnouncement(announcementTitle, announcementMsg, announcementZones, true);
     setAnnouncementModal(false);
     setAnnouncementTitle('');
     setAnnouncementMsg('');
@@ -120,6 +137,46 @@ export default function Dashboard({ onNavigateTab }) {
                   className="w-full bg-[#0b0f19] border border-borderMuted rounded-lg p-2.5 text-white focus:outline-none focus:border-cyan-500"
                 ></textarea>
               </div>
+              <div>
+                <label className="text-gray-300 font-semibold block mb-1">Target P.A. Speakers / Zones</label>
+                <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+                  {[
+                    { id: 'ALL', label: 'All Facility Speakers' },
+                    { id: 'BLOCK_A', label: 'Cell Block A' },
+                    { id: 'BLOCK_B', label: 'Cell Block B' },
+                    { id: 'BLOCK_C', label: 'Cell Block C' },
+                    { id: 'YARD', label: 'Common Exercise Yard' },
+                    { id: 'MEDICAL', label: 'Medical Ward' },
+                    { id: 'ADMIN', label: 'Administration' },
+                    { id: 'SPINE', label: 'Central Secure Spine' }
+                  ].map(z => (
+                    <label key={z.id} className="flex items-center gap-1.5 p-1.5 rounded bg-[#0b0f19] border border-borderMuted cursor-pointer text-gray-300">
+                      <input
+                        type="checkbox"
+                        checked={announcementZones.includes(z.id)}
+                        onChange={(e) => {
+                          if (z.id === 'ALL') {
+                            setAnnouncementZones(['ALL']);
+                          } else {
+                            const withoutAll = announcementZones.filter(x => x !== 'ALL');
+                            if (e.target.checked) {
+                              setAnnouncementZones([...withoutAll, z.id]);
+                            } else {
+                              const remaining = withoutAll.filter(x => x !== z.id);
+                              setAnnouncementZones(remaining.length === 0 ? ['ALL'] : remaining);
+                            }
+                          }
+                        }}
+                        className="rounded accent-cyan-500"
+                      />
+                      <span>{z.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="p-2 rounded bg-cyan-950/30 border border-cyan-800/40 text-cyan-300 text-[11px]">
+                <span>Broadcast will be synthesized via Web Speech API on the Simulator and logged to audit.</span>
+              </div>
               <div className="flex justify-end gap-3 pt-2">
                 <button
                   type="button"
@@ -136,6 +193,76 @@ export default function Dashboard({ onNavigateTab }) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Emergency Facility Lockdown Banner */}
+      {isLockdown && (
+        <div className="bg-red-600/90 text-white font-extrabold text-xs tracking-wider uppercase py-2.5 px-4 rounded-xl flex items-center justify-between gap-3 shadow-xl backdrop-blur-md animate-pulse">
+          <div className="flex items-center gap-2">
+            <AlertOctagon className="w-5 h-5 fill-white text-red-600" />
+            <span>FACILITY EMERGENCY LOCKDOWN ACTIVE • ALL PERIMETER GATES & CELL DOORS SECURED</span>
+          </div>
+          <button
+            onClick={handleLockdownRelease}
+            className="px-3 py-1 bg-white hover:bg-gray-100 text-red-600 font-bold rounded-lg text-xs transition"
+          >
+            Release Lockdown
+          </button>
+        </div>
+      )}
+
+      {/* Synchronized Facility Simulation Clock Bar */}
+      {simClock && (
+        <div className="bg-[#111827] border border-borderMuted rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-cyan-950 border border-cyan-800 text-cyan-400">
+              <Clock className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-mono font-bold text-white text-base">{simClock.displayTime || '09:30:00'}</span>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-800 text-cyan-300 border border-slate-700">
+                  {simClock.currentPhase?.name || 'Standard Routine'}
+                </span>
+              </div>
+              <span className="text-[11px] text-gray-400 font-mono">
+                {simClock.currentPhase?.timeRange} • {simClock.currentPhase?.description}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 font-mono text-xs">
+            <span className="text-gray-400 text-[10px] pr-1">Sim Speed:</span>
+            {[
+              { val: 1, label: '1x' },
+              { val: 2, label: '2x' },
+              { val: 5, label: '5x' }
+            ].map(s => (
+              <button
+                key={s.val}
+                onClick={() => controlClock({ speed: s.val, isPaused: false })}
+                className={`px-2 py-1 rounded text-xs font-bold transition ${
+                  simClock.speed === s.val && !simClock.isPaused
+                    ? 'bg-cyan-600 text-white'
+                    : 'bg-[#0b0f19] hover:bg-slate-800 text-gray-300'
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+            <button
+              onClick={() => controlClock({ isPaused: !simClock.isPaused })}
+              className={`p-1.5 rounded transition ${
+                simClock.isPaused
+                  ? 'bg-amber-600 text-white animate-pulse'
+                  : 'bg-[#0b0f19] hover:bg-slate-800 text-gray-300'
+              }`}
+              title={simClock.isPaused ? 'Resume Clock' : 'Pause Clock'}
+            >
+              {simClock.isPaused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
+            </button>
           </div>
         </div>
       )}
@@ -388,13 +515,23 @@ export default function Dashboard({ onNavigateTab }) {
                   <span className="text-[11px] font-semibold text-gray-200">Open Gate</span>
                 </button>
 
-                <button
-                  onClick={handleLockdownTrigger}
-                  className="p-3 bg-red-950/40 hover:bg-red-900/50 border border-red-500/40 rounded-lg flex flex-col items-center justify-center text-center gap-1.5 transition group"
-                >
-                  <Lock className="w-4 h-4 text-red-400 group-hover:scale-110 transition" />
-                  <span className="text-[11px] font-bold text-red-300">Lock Down</span>
-                </button>
+                {isLockdown ? (
+                  <button
+                    onClick={handleLockdownRelease}
+                    className="p-3 bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-500/50 rounded-lg flex flex-col items-center justify-center text-center gap-1.5 transition group"
+                  >
+                    <Unlock className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition" />
+                    <span className="text-[11px] font-bold text-emerald-300">Release Lock</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleLockdownTrigger}
+                    className="p-3 bg-red-950/40 hover:bg-red-900/50 border border-red-500/40 rounded-lg flex flex-col items-center justify-center text-center gap-1.5 transition group"
+                  >
+                    <Lock className="w-4 h-4 text-red-400 group-hover:scale-110 transition" />
+                    <span className="text-[11px] font-bold text-red-300">Lock Down</span>
+                  </button>
+                )}
 
                 <button
                   onClick={() => setAnnouncementModal(true)}
@@ -565,6 +702,9 @@ export default function Dashboard({ onNavigateTab }) {
           </div>
         </div>
       </div>
+
+      {/* Real-time Communication Monitor & Telemetry Trace */}
+      <CommunicationMonitor />
     </div>
   );
 }

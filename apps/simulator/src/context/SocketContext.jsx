@@ -10,6 +10,8 @@ export function SocketProvider({ children }) {
   const [latency, setLatency] = useState(12);
   const [state, setState] = useState(null);
   const [waypointsData, setWaypointsData] = useState(null);
+  const [isAudioEnabled, setIsAudioEnabled] = useState(false);
+  const [activeAnnouncement, setActiveAnnouncement] = useState(null);
 
   const refreshState = useCallback(async () => {
     try {
@@ -27,6 +29,56 @@ export function SocketProvider({ children }) {
       console.error('Snapshot fetch error:', e);
     }
   }, []);
+
+  // Web Speech API Announcement Playback
+  const playAnnouncementSpeech = useCallback(async (announcement) => {
+    setActiveAnnouncement(announcement);
+    setTimeout(() => {
+      setActiveAnnouncement(prev => prev?.id === announcement.id ? null : prev);
+    }, 8000);
+
+    let success = false;
+    let method = 'ON_SCREEN_DISPLAY';
+    let errorMsg = null;
+
+    if (isAudioEnabled && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+        const speechText = `Attention: ${announcement.title}. ${announcement.message}`;
+        const utterance = new SpeechSynthesisUtterance(speechText);
+        utterance.rate = 0.95;
+        utterance.pitch = 1.0;
+        utterance.volume = 1.0;
+
+        window.speechSynthesis.speak(utterance);
+        success = true;
+        method = 'WEB_SPEECH_API';
+      } catch (err) {
+        errorMsg = err.message;
+      }
+    } else if (!isAudioEnabled) {
+      errorMsg = 'Audio muted by user preference';
+    } else {
+      errorMsg = 'SpeechSynthesis not supported by browser';
+    }
+
+    // Report playback status back to backend
+    try {
+      await fetch(`${API_BASE_URL}/api/announcements/playback-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          announcementId: announcement.id,
+          client: 'SIMULATOR_BROWSER',
+          success,
+          method,
+          error: errorMsg
+        })
+      });
+    } catch (err) {
+      console.warn('Failed to report announcement playback status:', err);
+    }
+  }, [isAudioEnabled]);
 
   useEffect(() => {
     const s = io(WS_URL, {
@@ -55,11 +107,27 @@ export function SocketProvider({ children }) {
           ...prev,
           systemHealth: tickData.systemHealth,
           lastUpdated: tickData.lastUpdated,
-          controllers: tickData.controllers,
-          people: tickData.people,
-          gates: tickData.gates
+          simulationClock: tickData.simulationClock || prev.simulationClock,
+          controllers: tickData.controllers || prev.controllers,
+          people: tickData.people || prev.people,
+          gates: tickData.gates || prev.gates,
+          doors: tickData.doors || prev.doors,
+          speakers: tickData.speakers || prev.speakers,
+          lockdown: tickData.lockdown || prev.lockdown
         };
       });
+    });
+
+    s.on('announcement:new', (ann) => {
+      playAnnouncementSpeech(ann);
+    });
+
+    s.on('facility:lockdown_activated', (lockdownData) => {
+      setState(prev => prev ? { ...prev, lockdown: lockdownData } : prev);
+    });
+
+    s.on('facility:lockdown_released', (lockdownData) => {
+      setState(prev => prev ? { ...prev, lockdown: lockdownData } : prev);
     });
 
     s.on('people:update', (updatedPeople) => {
@@ -80,7 +148,7 @@ export function SocketProvider({ children }) {
       clearInterval(pingInterval);
       s.disconnect();
     };
-  }, [refreshState]);
+  }, [refreshState, playAnnouncementSpeech]);
 
   // Actions
   const commandGate = async (gateId, targetState) => {
@@ -101,6 +169,28 @@ export function SocketProvider({ children }) {
         'Content-Type': 'application/json',
         Authorization: 'Bearer SIMULATOR_BYPASS'
       }
+    }).then(r => r.json());
+  };
+
+  const operateDoor = async (doorId, action) => {
+    return fetch(`${API_BASE_URL}/api/doors/${doorId}/operate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer SIMULATOR_BYPASS'
+      },
+      body: JSON.stringify({ action })
+    }).then(r => r.json());
+  };
+
+  const lockDoor = async (doorId, action) => {
+    return fetch(`${API_BASE_URL}/api/doors/${doorId}/lock`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer SIMULATOR_BYPASS'
+      },
+      body: JSON.stringify({ action })
     }).then(r => r.json());
   };
 
@@ -155,9 +245,15 @@ export function SocketProvider({ children }) {
         latency,
         state,
         waypointsData,
+        isAudioEnabled,
+        setIsAudioEnabled,
+        activeAnnouncement,
+        setActiveAnnouncement,
         refreshState,
         commandGate,
         jamGate,
+        operateDoor,
+        lockDoor,
         triggerSensor,
         scanRfid,
         movePerson,

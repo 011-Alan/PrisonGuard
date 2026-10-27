@@ -52,9 +52,15 @@ class PersistentStore {
         fs.mkdirSync(this.dir, { recursive: true });
       }
       this.data.lastSavedAt = new Date().toISOString();
-      const tempPath = `${this.filePath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify(this.data, null, 2), 'utf-8');
-      fs.renameSync(tempPath, this.filePath);
+      const content = JSON.stringify(this.data, null, 2);
+      try {
+        const tempPath = `${this.filePath}.tmp`;
+        fs.writeFileSync(tempPath, content, 'utf-8');
+        fs.renameSync(tempPath, this.filePath);
+      } catch (renameErr) {
+        // Fallback directly on Windows if temp file rename has transient lock
+        fs.writeFileSync(this.filePath, content, 'utf-8');
+      }
     } catch (err) {
       console.error('[Storage Error] Failed to persist data to disk:', err);
     }

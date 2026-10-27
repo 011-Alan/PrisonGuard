@@ -34,7 +34,10 @@ export default function PrisonFloorPlan({
   const people = state?.people ? Object.values(state.people) : [];
   const devices = state?.devices ? Object.values(state.devices) : [];
   const gates = state?.gates ? Object.values(state.gates) : [];
+  const doors = state?.doors ? Object.values(state.doors) : [];
+  const speakers = state?.speakers ? Object.values(state.speakers) : [];
   const controllers = state?.controllers ? Object.values(state.controllers) : [];
+  const isLockdown = state?.lockdown?.isActive;
 
   // Pan interaction
   const handleMouseDown = (e) => {
@@ -369,9 +372,118 @@ export default function PrisonFloorPlan({
                 fontSize="9"
                 fontWeight="bold"
                 textAnchor="middle"
-                className="opacity-0 group-hover:opacity-100 transition"
+                className="opacity-0 group-hover:opacity-100 transition pointer-events-none drop-shadow"
               >
                 {gate.name} (Click to toggle)
+              </text>
+            </g>
+          );
+        })}
+
+        {/* ---------------- 3B. CELL & INTERNAL DOORS ---------------- */}
+        {doors.map((door) => {
+          const isOpen = door.position === 'OPEN';
+          const isOpening = door.position === 'OPENING' || door.position === 'CLOSING';
+          const isLocked = door.lockState === 'LOCKED';
+
+          return (
+            <g
+              key={door.id}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectDevice && onSelectDevice(door);
+              }}
+              className="cursor-pointer group"
+            >
+              {/* Physical Door Leaf */}
+              <rect
+                x={door.x - 14}
+                y={door.y - 4}
+                width={28}
+                height={8}
+                rx="2"
+                fill={isOpen ? '#064e3b' : '#1e293b'}
+                stroke={isOpen ? '#10b981' : '#64748b'}
+                strokeWidth="1.5"
+                strokeDasharray={isOpen ? '4,2' : 'none'}
+              />
+              {/* Lock Status Micro-Badge */}
+              <circle
+                cx={door.x + 12}
+                cy={door.y}
+                r="4.5"
+                fill={isLocked ? '#991b1b' : '#065f46'}
+                stroke="#ffffff"
+                strokeWidth="1"
+              />
+              <text
+                x={door.x + 12}
+                y={door.y + 2.5}
+                fill="#ffffff"
+                fontSize="6"
+                fontWeight="bold"
+                textAnchor="middle"
+                pointerEvents="none"
+              >
+                {isLocked ? 'L' : 'U'}
+              </text>
+
+              {/* Tooltip on hover */}
+              <text
+                x={door.x}
+                y={door.y - 8}
+                fill="#ffffff"
+                fontSize="8"
+                fontWeight="bold"
+                textAnchor="middle"
+                className="opacity-0 group-hover:opacity-100 transition pointer-events-none drop-shadow"
+              >
+                {door.name} ({door.position} • {door.lockState})
+              </text>
+            </g>
+          );
+        })}
+
+        {/* ---------------- 3C. PUBLIC ADDRESS SPEAKERS (ACTUATORS) ---------------- */}
+        {speakers.map((spk) => {
+          const isBroadcasting = spk.state === 'BROADCASTING';
+
+          return (
+            <g
+              key={spk.id}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectDevice && onSelectDevice(spk);
+              }}
+              className="cursor-pointer group"
+            >
+              {/* Animated Sound Ripple if Broadcasting */}
+              {isBroadcasting && (
+                <>
+                  <circle cx={spk.x} cy={spk.y} r="18" fill="none" stroke="#38bdf8" strokeWidth="2" className="animate-ping opacity-75" />
+                  <circle cx={spk.x} cy={spk.y} r="28" fill="none" stroke="#0284c7" strokeWidth="1.5" className="animate-ping opacity-40" />
+                </>
+              )}
+
+              {/* Speaker Horn Icon Body */}
+              <polygon
+                points={`${spk.x - 7},${spk.y - 5} ${spk.x - 7},${spk.y + 5} ${spk.x - 2},${spk.y + 5} ${spk.x + 6},${spk.y + 9} ${spk.x + 6},${spk.y - 9} ${spk.x - 2},${spk.y - 5}`}
+                fill={isBroadcasting ? '#0284c7' : '#1e293b'}
+                stroke={isBroadcasting ? '#38bdf8' : '#64748b'}
+                strokeWidth="1.5"
+              />
+
+              {/* Speaker Label */}
+              <text
+                x={spk.x}
+                y={spk.y - 12}
+                fill={isBroadcasting ? '#38bdf8' : '#ffffff'}
+                fontSize="8"
+                fontWeight="bold"
+                textAnchor="middle"
+                className="opacity-0 group-hover:opacity-100 transition pointer-events-none drop-shadow"
+              >
+                {spk.name} {isBroadcasting ? '(BROADCASTING)' : ''}
               </text>
             </g>
           );
@@ -381,7 +493,6 @@ export default function PrisonFloorPlan({
         {showIoTOverlay && (
           <g id="IoTOverlay">
             {/* Infrared Laser Beams across perimeter */}
-            {/* North Beam */}
             <line
               x1="200"
               y1="50"
@@ -392,7 +503,6 @@ export default function PrisonFloorPlan({
               strokeDasharray={state?.devices?.['IR-BEAM-N']?.value === 'BROKEN' ? '6,4' : 'none'}
               opacity="0.75"
             />
-            {/* East Beam */}
             <line
               x1="1485"
               y1="80"
@@ -403,7 +513,6 @@ export default function PrisonFloorPlan({
               strokeDasharray={state?.devices?.['IR-BEAM-E']?.value === 'BROKEN' ? '6,4' : 'none'}
               opacity="0.8"
             />
-            {/* West Beam */}
             <line
               x1="115"
               y1="80"
@@ -413,7 +522,6 @@ export default function PrisonFloorPlan({
               strokeWidth="1.5"
               opacity="0.75"
             />
-            {/* South Beam */}
             <line
               x1="200"
               y1="940"
@@ -427,7 +535,6 @@ export default function PrisonFloorPlan({
             {/* ESP32 Controller Nodes */}
             {controllers.map((ctrl) => {
               const isOnline = ctrl.status === 'ONLINE';
-              // Approximate position for visual representation
               let cx = 240, cy = 90;
               if (ctrl.id.includes('CELL-02')) { cx = 670; cy = 90; }
               if (ctrl.id.includes('CELL-03')) { cx = 1100; cy = 90; }
@@ -452,7 +559,6 @@ export default function PrisonFloorPlan({
               const isSelected = selectedDevice?.id === dev.id;
               const isOnline = dev.status === 'ONLINE';
 
-              // Sensor color mapping
               let fillColor = '#10b981';
               if (!isOnline) fillColor = '#64748b';
               else if (dev.value === 'OPEN' || dev.value === 'DETECTED' || dev.value === 'BROKEN' || dev.value === 'TRIPPED' || dev.value === 'PRESSED') {
@@ -520,8 +626,34 @@ export default function PrisonFloorPlan({
         {/* ---------------- 6. CLICKABLE PERSONNEL BEACONS ---------------- */}
         {people.map((person) => {
           const isOfficer = person.type === 'OFFICER';
+          const isSupervisor = person.type === 'SUPERVISOR';
+          const isDoctor = person.type === 'MEDICAL_DOCTOR';
+          const isNurse = person.type === 'MEDICAL_NURSE';
+          const isMedical = isDoctor || isNurse;
           const isSelected = selectedPerson?.id === person.id;
           const isMoving = person.status === 'IN_TRANSIT';
+
+          // Color & Beacon initial config
+          let beaconStroke = '#f59e0b';
+          let beaconFill = '#d97706';
+          let beaconInitial = 'P';
+          if (isOfficer) {
+            beaconStroke = '#3b82f6';
+            beaconFill = '#2563eb';
+            beaconInitial = 'G';
+          } else if (isSupervisor) {
+            beaconStroke = '#a855f7';
+            beaconFill = '#9333ea';
+            beaconInitial = 'SUP';
+          } else if (isDoctor) {
+            beaconStroke = '#10b981';
+            beaconFill = '#059669';
+            beaconInitial = 'MD';
+          } else if (isNurse) {
+            beaconStroke = '#14b8a6';
+            beaconFill = '#0d9488';
+            beaconInitial = 'RN';
+          }
 
           return (
             <g
@@ -537,33 +669,33 @@ export default function PrisonFloorPlan({
                 cx={person.x}
                 cy={person.y}
                 r={isSelected ? "20" : "14"}
-                fill={isOfficer ? "rgba(59, 130, 246, 0.25)" : "rgba(245, 158, 11, 0.25)"}
-                stroke={isOfficer ? "#3b82f6" : "#f59e0b"}
-                strokeWidth={isSelected ? "2.5" : "1"}
+                fill="none"
+                stroke={beaconStroke}
+                strokeWidth={isSelected ? "2.5" : "1.2"}
                 className={isMoving ? "animate-ping opacity-60" : "animate-pulse"}
               />
 
-              {/* Central Marker Circle */}
+              {/* Central Marker */}
               <circle
                 cx={person.x}
                 cy={person.y}
                 r="9"
-                fill={isOfficer ? "#2563eb" : "#d97706"}
+                fill={beaconFill}
                 stroke="#ffffff"
                 strokeWidth="2"
               />
 
-              {/* Mini Icon / Initial */}
+              {/* Mini Role Initial */}
               <text
                 x={person.x}
                 y={person.y + 3}
                 fill="#ffffff"
-                fontSize="8"
+                fontSize={beaconInitial.length > 1 ? "6.5" : "8"}
                 fontWeight="extrabold"
                 textAnchor="middle"
                 pointerEvents="none"
               >
-                {isOfficer ? 'G' : 'P'}
+                {beaconInitial}
               </text>
 
               {/* Floating Name Badge */}
@@ -574,7 +706,7 @@ export default function PrisonFloorPlan({
                 height="15"
                 rx="3"
                 fill="#0f172a"
-                stroke={isOfficer ? "#3b82f6" : "#f59e0b"}
+                stroke={beaconStroke}
                 strokeWidth="1"
                 opacity="0.9"
               />
@@ -592,37 +724,69 @@ export default function PrisonFloorPlan({
             </g>
           );
         })}
+
+        {/* ---------------- 7. FACILITY LOCKDOWN RED STROBE BORDER ---------------- */}
+        {isLockdown && (
+          <rect
+            x="40"
+            y="10"
+            width="1520"
+            height="980"
+            rx="16"
+            fill="none"
+            stroke="#ef4444"
+            strokeWidth="8"
+            strokeDasharray="24,12"
+            className="animate-pulse"
+          />
+        )}
       </svg>
 
-      {/* Floating Map Legend (Bottom-Left) */}
-      <div className="absolute bottom-5 left-5 bg-[#0f172a]/90 backdrop-blur border border-slate-700/80 rounded-xl p-3 text-xs text-gray-300 space-y-1.5 shadow-xl select-none">
+      {/* Floating Tactical Map Legend (Bottom-Left) */}
+      <div className="absolute bottom-5 left-5 bg-[#0f172a]/95 backdrop-blur-md border border-slate-700/80 rounded-xl p-3 text-xs text-gray-300 space-y-2 shadow-2xl select-none max-w-xs">
         <span className="font-bold text-white text-[10px] uppercase tracking-wider block border-b border-slate-800 pb-1">
-          Tactical Map Legend
+          Tactical Map Legend & Symbols
         </span>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
           <div className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
-            <span>Officer Beacon</span>
+            <span>Officer (G)</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
-            <span>Inmate Beacon</span>
+            <span className="w-2.5 h-2.5 rounded-full bg-purple-500"></span>
+            <span>Supervisor (SUP)</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-            <span>Sensor Normal</span>
+            <span>Medical (MD/RN)</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>
-            <span>Sensor Alert / Open</span>
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+            <span>Inmate Beacon (P)</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 bg-cyan-900 border border-cyan-400"></span>
-            <span>ESP32 Node</span>
+            <span className="w-3.5 h-1.5 bg-slate-700 border border-slate-500"></span>
+            <span>Cell Door (L/U)</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-3.5 h-1.5 bg-cyan-900 border border-cyan-400"></span>
+            <span>Perimeter Gate</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 bg-cyan-950 border border-cyan-400"></span>
+            <span>ESP32 Gateway</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-sky-500"></span>
+            <span>PA Speaker Horn</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-4 h-0.5 bg-emerald-400"></span>
             <span>IR Optical Beam</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>
+            <span>Alarm / Breach</span>
           </div>
         </div>
       </div>

@@ -11,7 +11,9 @@ export function SocketProvider({ children }) {
   const [connected, setConnected] = useState(false);
   const [latency, setLatency] = useState(12);
   const [state, setState] = useState(null);
+  const [commands, setCommands] = useState([]);
   const [recentMqttPackets, setRecentMqttPackets] = useState([]);
+  const [lastSyncTime, setLastSyncTime] = useState(new Date().toISOString());
 
   // Fetch full state snapshot via REST
   const refreshState = useCallback(async () => {
@@ -20,6 +22,12 @@ export function SocketProvider({ children }) {
       if (res.ok) {
         const data = await res.json();
         setState(data);
+        setLastSyncTime(new Date().toISOString());
+      }
+      const cmdRes = await fetch(`${API_BASE_URL}/api/commands`);
+      if (cmdRes.ok) {
+        const cmdData = await cmdRes.json();
+        setCommands(cmdData.commands || []);
       }
     } catch (e) {
       console.error('Failed to fetch snapshot:', e);
@@ -44,6 +52,7 @@ export function SocketProvider({ children }) {
 
     s.on('state:full', (newState) => {
       setState(newState);
+      setLastSyncTime(new Date().toISOString());
     });
 
     s.on('state:tick', (tickData) => {
@@ -53,11 +62,31 @@ export function SocketProvider({ children }) {
           ...prev,
           systemHealth: tickData.systemHealth,
           lastUpdated: tickData.lastUpdated,
-          controllers: tickData.controllers,
-          people: tickData.people,
-          gates: tickData.gates
+          simulationClock: tickData.simulationClock || prev.simulationClock,
+          controllers: tickData.controllers || prev.controllers,
+          people: tickData.people || prev.people,
+          gates: tickData.gates || prev.gates,
+          doors: tickData.doors || prev.doors,
+          speakers: tickData.speakers || prev.speakers,
+          lockdown: tickData.lockdown || prev.lockdown
         };
       });
+    });
+
+    s.on('command:new', (cmd) => {
+      setCommands(prev => [cmd, ...prev.slice(0, 99)]);
+    });
+
+    s.on('command:update', (updatedCmd) => {
+      setCommands(prev => prev.map(c => c.id === updatedCmd.id ? updatedCmd : c));
+    });
+
+    s.on('facility:lockdown_activated', (lockdownData) => {
+      setState(prev => prev ? { ...prev, lockdown: lockdownData } : prev);
+    });
+
+    s.on('facility:lockdown_released', (lockdownData) => {
+      setState(prev => prev ? { ...prev, lockdown: lockdownData } : prev);
     });
 
     s.on('people:update', (updatedPeople) => {
@@ -121,10 +150,37 @@ export function SocketProvider({ children }) {
     });
   };
 
+  const operateDoor = async (doorId, action) => {
+    return authFetch(`/api/doors/${doorId}/operate`, {
+      method: 'POST',
+      body: JSON.stringify({ action })
+    });
+  };
+
+  const lockDoor = async (doorId, action) => {
+    return authFetch(`/api/doors/${doorId}/lock`, {
+      method: 'POST',
+      body: JSON.stringify({ action })
+    });
+  };
+
   const commandDoor = async (lockId, action) => {
     return authFetch(`/api/doors/${lockId}/command`, {
       method: 'POST',
       body: JSON.stringify({ action })
+    });
+  };
+
+  const activateLockdown = async (policy = {}) => {
+    return authFetch('/api/lockdown/activate', {
+      method: 'POST',
+      body: JSON.stringify(policy)
+    });
+  };
+
+  const releaseLockdown = async () => {
+    return authFetch('/api/lockdown/release', {
+      method: 'POST'
     });
   };
 
@@ -156,6 +212,13 @@ export function SocketProvider({ children }) {
     });
   };
 
+  const createEscort = async (personId, escortId, destinationWaypointId) => {
+    return authFetch(`/api/people/${personId}/escort`, {
+      method: 'POST',
+      body: JSON.stringify({ escortId, destinationWaypointId })
+    });
+  };
+
   const ackIncident = async (incidentId) => {
     return authFetch(`/api/incidents/${incidentId}/ack`, {
       method: 'POST'
@@ -168,10 +231,17 @@ export function SocketProvider({ children }) {
     });
   };
 
-  const broadcastAnnouncement = async (title, message) => {
+  const broadcastAnnouncement = async (title, message, zones = ['ALL'], chime = true) => {
     return authFetch('/api/announcements', {
       method: 'POST',
-      body: JSON.stringify({ title, message })
+      body: JSON.stringify({ title, message, zones, chime })
+    });
+  };
+
+  const controlClock = async ({ speed, isPaused, time }) => {
+    return authFetch('/api/clock/control', {
+      method: 'POST',
+      body: JSON.stringify({ speed, isPaused, time })
     });
   };
 
@@ -200,18 +270,26 @@ export function SocketProvider({ children }) {
         connected,
         latency,
         state,
+        commands,
         recentMqttPackets,
+        lastSyncTime,
         refreshState,
         commandGate,
         jamGate,
+        operateDoor,
+        lockDoor,
         commandDoor,
+        activateLockdown,
+        releaseLockdown,
         triggerSensor,
         toggleController,
         scanRfid,
         movePerson,
+        createEscort,
         ackIncident,
         resolveIncident,
         broadcastAnnouncement,
+        controlClock,
         startScenario,
         stopScenario,
         resetSimulation

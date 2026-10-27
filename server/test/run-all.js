@@ -238,8 +238,154 @@ async function runTests() {
     });
     assert(badState.status === 400, 'Illegal target state rejected with HTTP 400');
 
-    // 8. Clean Reset Behavior
-    console.log('\n[SUITE 8: Simulation Reset to Baseline]');
+    // 8. Door Operations & Physical Position vs Solenoid Lock
+    console.log('\n[SUITE 8: Door Operations & Physical vs Lock State]');
+    // Attempting to open locked door should fail with 400
+    const lockedDoorOpen = await request('/api/doors/DOOR-A101/operate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`
+      },
+      body: JSON.stringify({ action: 'OPEN' })
+    });
+    assert(lockedDoorOpen.status === 400, 'Opening locked door rejected (requires unlock first)');
+
+    // Unlock door
+    const unlockRes = await request('/api/doors/DOOR-A101/lock', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`
+      },
+      body: JSON.stringify({ action: 'UNLOCK' })
+    });
+    assert(unlockRes.status === 200, 'Door unlocked successfully');
+    assert(engine.state.doors['DOOR-A101'].lockState === 'UNLOCKED', 'Door lockState updated to UNLOCKED');
+
+    // Open unlocked door
+    const openRes = await request('/api/doors/DOOR-A101/operate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`
+      },
+      body: JSON.stringify({ action: 'OPEN' })
+    });
+    assert(openRes.status === 200, 'Unlocked door operates towards OPEN');
+
+    // 9. Command Lifecycle & Communication Traces
+    console.log('\n[SUITE 9: Command Lifecycle & Communication Trace]');
+    const cmdsRes = await request('/api/commands');
+    assert(cmdsRes.status === 200, 'Commands history endpoint returns HTTP 200');
+    assert(cmdsRes.data.commands.length > 0, 'Command history records dispatched commands');
+
+    const firstCmd = cmdsRes.data.commands[0];
+    const traceRes = await request(`/api/commands/${firstCmd.id}/trace`);
+    assert(traceRes.status === 200, 'Command trace endpoint returns HTTP 200');
+    assert(traceRes.data.command.trace.length === 8, 'Communication trace contains 8 sequential verification stages');
+
+    // 10. Emergency Facility Lockdown & Safe Release
+    console.log('\n[SUITE 10: Facility Emergency Lockdown & Release]');
+    const lockdownActRes = await request('/api/lockdown/activate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`
+      },
+      body: JSON.stringify({ scope: 'FULL_FACILITY' })
+    });
+    assert(lockdownActRes.status === 200, 'Lockdown activation returns HTTP 200');
+    assert(engine.state.lockdown.isActive === true, 'Lockdown state is ACTIVE');
+    assert(engine.state.doors['DOOR-A101'].lockState === 'LOCKED', 'Cell doors locked under lockdown');
+    assert(engine.state.devices['ALARM-FACILITY'].value === 'ACTIVE', 'Alarm strobe activated under lockdown');
+
+    const lockdownRelRes = await request('/api/lockdown/release', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`
+      }
+    });
+    assert(lockdownRelRes.status === 200, 'Lockdown release returns HTTP 200');
+    assert(engine.state.lockdown.isActive === false, 'Lockdown state restored to inactive');
+    assert(engine.state.devices['ALARM-FACILITY'].value === 'STANDBY', 'Alarm strobe deactivated');
+
+    // 11. Public Address Broadcast & Simulator Audio Playback Reporting
+    console.log('\n[SUITE 11: P.A. Broadcast & Audio Playback Reporting]');
+    // Reset speakers to IDLE prior to targeted test
+    for (const spk of Object.values(engine.state.speakers)) {
+      spk.state = 'IDLE';
+    }
+
+    const annRes = await request('/api/announcements', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`
+      },
+      body: JSON.stringify({
+        title: 'Morning Roll Call',
+        message: 'All cell blocks prepare for count.',
+        zones: ['BLOCK_A', 'BLOCK_B']
+      })
+    });
+    assert(annRes.status === 200, 'Broadcast announcement dispatched');
+    assert(engine.state.speakers['SPEAKER-BLOCK-A'].state === 'BROADCASTING', 'Targeted Block A speaker actively broadcasting');
+    assert(engine.state.speakers['SPEAKER-BLOCK-C'].state === 'IDLE', 'Untargeted Block C speaker remains idle');
+
+    // Simulator reporting audio playback
+    const reportRes = await request('/api/announcements/playback-status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        announcementId: annRes.data.announcement.id,
+        client: 'SIMULATOR_TEST',
+        success: true,
+        method: 'WEB_SPEECH_API'
+      })
+    });
+    assert(reportRes.status === 200, 'Simulator audio playback report accepted');
+    assert(engine.state.speakers['SPEAKER-BLOCK-A'].lastPlaybackReport?.success === true, 'Speaker recorded confirmed playback report');
+
+    // 12. Simulation Clock Control & Daily Schedule
+    console.log('\n[SUITE 12: Simulation Clock & Daily Routine Schedules]');
+    const clockRes = await request('/api/clock/control', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`
+      },
+      body: JSON.stringify({ speed: 2, isPaused: false })
+    });
+    assert(clockRes.status === 200, 'Clock speed set to 2x');
+    assert(engine.state.simulationClock.speed === 2, 'Simulation clock reflects 2x speed');
+    assert(Boolean(engine.state.simulationClock.currentPhase?.name), 'Facility daily schedule phase active');
+
+    // 13. Escort-Controlled Personnel Movement
+    console.log('\n[SUITE 13: Escort-Controlled Personnel Movement]');
+    const escortRes = await request('/api/people/P-1044/escort', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`
+      },
+      body: JSON.stringify({
+        escortId: 'OFC-514',
+        destinationWaypointId: 'W_MED_1'
+      })
+    });
+    assert(escortRes.status === 200, 'Escort task successfully created');
+    assert(engine.state.people['P-1044'].status === 'IN_TRANSIT', 'Escorted inmate status set to IN_TRANSIT');
+
+    // 14. Communication Diagnostics
+    console.log('\n[SUITE 14: System Diagnostics & Health Status]');
+    const commRes = await request('/api/system/communication-status');
+    assert(commRes.status === 200, 'System communication status returns HTTP 200');
+    assert(commRes.data.gateways.online === commRes.data.gateways.total, 'All ESP32 gateways reported ONLINE');
+
+    // 15. Clean Reset Behavior
+    console.log('\n[SUITE 15: Simulation Reset to Baseline]');
     const resetRes = await request('/api/scenarios/reset', { method: 'POST' });
     assert(resetRes.status === 200, 'Reset simulation endpoint succeeds');
     assert(engine.state.gates['GATE-01']?.state === 'CLOSED', 'Gate reset to default baseline');

@@ -51,7 +51,41 @@ export function createApiRouter(engine) {
     }
   });
 
-  // Door Lock Command (Protected: OPERATOR, SUPERVISOR, ADMIN)
+  // Door Physical Operation (OPEN / CLOSE)
+  router.post('/doors/:id/operate', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      const { id } = req.params;
+      const { action } = req.body || {};
+
+      if (!['OPEN', 'CLOSE'].includes(action)) {
+        return res.status(400).json({ error: 'Invalid action. Allowed values: OPEN, CLOSE' });
+      }
+
+      const result = engine.handleDoorOperate(id, action, req.user);
+      res.json({ success: true, ...result });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Door Lock/Unlock Command (LOCK / UNLOCK)
+  router.post('/doors/:id/lock', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      const { id } = req.params;
+      const { action } = req.body || {};
+
+      if (!['LOCK', 'UNLOCK'].includes(action)) {
+        return res.status(400).json({ error: 'Invalid action. Allowed values: LOCK, UNLOCK' });
+      }
+
+      const result = engine.handleDoorLock(id, action, req.user);
+      res.json({ success: true, ...result });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Door Lock Legacy Compatibility Command (Protected: OPERATOR, SUPERVISOR, ADMIN)
   router.post('/doors/:id/command', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
     try {
       const { id } = req.params;
@@ -61,8 +95,8 @@ export function createApiRouter(engine) {
         return res.status(400).json({ error: 'Invalid action. Allowed values: LOCK, UNLOCK' });
       }
 
-      const lock = engine.handleDoorCommand(id, action, req.user);
-      res.json({ success: true, lock });
+      const result = engine.handleDoorLock(id, action, req.user);
+      res.json({ success: true, lock: result.door });
     } catch (err) {
       res.status(400).json({ error: err.message });
     }
@@ -145,7 +179,149 @@ export function createApiRouter(engine) {
     }
   });
 
-  // Incident Management
+  // Escort Movement Task (Officer + Prisoner)
+  router.post('/people/:id/escort', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      const { id } = req.params;
+      const { escortId, destinationWaypointId } = req.body || {};
+
+      if (!escortId) return res.status(400).json({ error: 'escortId is required' });
+      if (!destinationWaypointId) return res.status(400).json({ error: 'destinationWaypointId is required' });
+
+      const result = engine.createEscortTask({
+        personId: id,
+        escortId,
+        destinationWaypointId,
+        user: req.user
+      });
+      res.json({ success: true, ...result });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Emergency Lockdown Controls (SUPERVISOR, ADMIN)
+  router.post('/lockdown/activate', authenticate, authorize(['SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      const result = engine.activateLockdown(req.user, req.body || {});
+      res.json({ success: true, lockdown: result });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  router.post('/lockdown/release', authenticate, authorize(['SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      const result = engine.releaseLockdown(req.user);
+      res.json({ success: true, lockdown: result });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Announcements (Admin or Supervisor only)
+  router.post('/announcements', authenticate, authorize(['ADMIN', 'SUPERVISOR']), (req, res) => {
+    try {
+      const { title, message, zones, chime } = req.body || {};
+      if (!title || typeof title !== 'string' || !title.trim()) {
+        return res.status(400).json({ error: 'Announcement title string is required' });
+      }
+      if (!message || typeof message !== 'string') {
+        return res.status(400).json({ error: 'Announcement message string is required' });
+      }
+
+      const ann = engine.broadcastAnnouncement({
+        title: title.trim(),
+        message: message.trim(),
+        zones: Array.isArray(zones) && zones.length > 0 ? zones : ['ALL'],
+        chime: chime !== false
+      }, req.user);
+
+      res.json({ success: true, announcement: ann });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Announcement Playback Status Report (Simulator Client)
+  router.post('/announcements/playback-status', (req, res) => {
+    try {
+      const { announcementId, client, success, method, error } = req.body || {};
+      if (!announcementId) {
+        return res.status(400).json({ error: 'announcementId is required' });
+      }
+
+      const report = engine.recordPlaybackStatus({
+        announcementId,
+        client: client || 'SIMULATOR',
+        success: success !== false,
+        method: method || 'WEB_SPEECH_API',
+        error
+      });
+
+      res.json({ success: true, report });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Simulation Clock Control
+  router.post('/clock/control', authenticate, authorize(['SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      const { speed, isPaused, time } = req.body || {};
+      const clock = engine.setSimulationClock({ speed, isPaused, time });
+      res.json({ success: true, clock });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Command History & Communication Trace Inspection
+  router.get('/commands', (req, res) => {
+    const limit = Math.min(parseInt(req.query.limit || '50', 10), 100);
+    res.json({
+      commands: engine.commandHistory.slice(0, limit),
+      total: engine.commandHistory.length
+    });
+  });
+
+  router.get('/commands/:id/trace', (req, res) => {
+    const cmd = engine.commandHistory.find(c => c.id === req.params.id);
+    if (!cmd) {
+      return res.status(404).json({ error: `Command ${req.params.id} not found` });
+    }
+    res.json({ success: true, command: cmd });
+  });
+
+  // Communication & Gateway Diagnostic Status
+  router.get('/system/communication-status', (req, res) => {
+    const controllers = Object.values(engine.state.controllers);
+    const onlineControllers = controllers.filter(c => c.status === 'ONLINE').length;
+    res.json({
+      backend: {
+        status: 'ONLINE',
+        uptimeSec: process.uptime(),
+        memoryMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+        version: 'v2.4-academic-iot'
+      },
+      gateways: {
+        total: controllers.length,
+        online: onlineControllers,
+        offline: controllers.length - onlineControllers,
+        details: controllers.map(c => ({ id: c.id, name: c.name, status: c.status, ip: c.ip }))
+      },
+      telemetry: {
+        totalDevices: Object.keys(engine.state.devices).length,
+        totalGates: Object.keys(engine.state.gates).length,
+        totalDoors: Object.keys(engine.state.doors).length,
+        totalSpeakers: Object.keys(engine.state.speakers).length,
+        lockdownActive: engine.state.lockdown.isActive,
+        activeScenario: engine.state.activeScenario,
+        simulationTime: engine.state.simulationClock?.displayTime
+      },
+      lastSyncTimestamp: new Date().toISOString()
+    });
+  });
   router.post('/incidents/:id/ack', authenticate, (req, res) => {
     try {
       const { id } = req.params;
@@ -161,24 +337,6 @@ export function createApiRouter(engine) {
       const { id } = req.params;
       const inc = engine.resolveIncident(id, req.user);
       res.json({ success: true, incident: inc });
-    } catch (err) {
-      res.status(400).json({ error: err.message });
-    }
-  });
-
-  // Announcements (Admin or Supervisor only)
-  router.post('/announcements', authenticate, authorize(['ADMIN', 'SUPERVISOR']), (req, res) => {
-    try {
-      const { title, message } = req.body || {};
-      if (!title || typeof title !== 'string' || !title.trim()) {
-        return res.status(400).json({ error: 'Announcement title string is required' });
-      }
-      if (!message || typeof message !== 'string') {
-        return res.status(400).json({ error: 'Announcement message string is required' });
-      }
-
-      const ann = engine.broadcastAnnouncement(title.trim(), message.trim(), req.user);
-      res.json({ success: true, announcement: ann });
     } catch (err) {
       res.status(400).json({ error: err.message });
     }

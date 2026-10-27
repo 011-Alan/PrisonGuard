@@ -6,6 +6,183 @@ export const INITIAL_STATE = {
   systemOnline: true,
   lastUpdated: new Date().toISOString(),
 
+  // Facility Simulation Clock
+  simulationClock: {
+    time: '2026-10-28T09:30:00.000Z',
+    displayTime: '09:30:00',
+    speed: 1, // 0 = paused, 1 = 1x, 2 = 2x, 5 = 5x
+    isPaused: false,
+    currentPhase: {
+      id: 'MORNING_ROUTINE',
+      name: 'Morning Routine & Medical Rounds',
+      timeRange: '08:00 - 10:30',
+      description: 'Cell count confirmed. Inmates permitted in designated corridors and medical evaluations.',
+      permittedZones: ['BLOCK_A', 'BLOCK_B', 'BLOCK_C', 'MEDICAL']
+    },
+    phases: [
+      { id: 'MORNING_COUNT', name: 'Morning Cell Count & Inspection', timeRange: '06:30 - 08:00', description: 'Mandatory muster and cell inspection.' },
+      { id: 'MORNING_ROUTINE', name: 'Morning Routine & Medical Rounds', timeRange: '08:00 - 10:30', description: 'Cell block checks, medical clinic triage, administrative duties.' },
+      { id: 'YARD_RECREATION', name: 'Yard Exercise & Common Recreation', timeRange: '10:30 - 12:30', description: 'Supervised recreation in common yard.' },
+      { id: 'LUNCH_PERIOD', name: 'Midday Meal & Escort Movement', timeRange: '12:30 - 14:00', description: 'Meal distribution under officer escort.' },
+      { id: 'FACILITY_WORK', name: 'Facility Maintenance & Work Detail', timeRange: '14:00 - 17:30', description: 'Authorized work details and interview sessions.' },
+      { id: 'EVENING_RECALL', name: 'Evening Cell Recall & Lockup', timeRange: '17:30 - 20:00', description: 'All inmates return to assigned cells.' },
+      { id: 'NIGHT_LOCKDOWN', name: 'Night Curfew & Perimeter Surveillance', timeRange: '20:00 - 06:30', description: 'Full cell isolation, perimeter radar & beam surveillance active.' }
+    ]
+  },
+
+  // Facility Emergency Lockdown State
+  lockdown: {
+    isActive: false,
+    initiatedBy: null,
+    initiatedRole: null,
+    timestamp: null,
+    affectedCount: 0,
+    successfulCount: 0,
+    failedCount: 0,
+    summary: 'Facility operating under standard security profile.'
+  },
+
+  // Public Address Speakers (Actuators)
+  speakers: {
+    'SPEAKER-BLOCK-A': {
+      id: 'SPEAKER-BLOCK-A',
+      name: 'Block A Corridor PA Speaker',
+      type: 'PA_SPEAKER',
+      zone: 'BLOCK_A',
+      location: 'Block A Corridor',
+      controllerId: 'ESP32-CELL-01',
+      gpio: 27,
+      status: 'ONLINE',
+      state: 'IDLE', // 'IDLE' | 'BROADCASTING'
+      lastAnnouncement: null,
+      lastPlaybackReport: null,
+      x: 370,
+      y: 195,
+      lastUpdated: new Date().toISOString()
+    },
+    'SPEAKER-BLOCK-B': {
+      id: 'SPEAKER-BLOCK-B',
+      name: 'Block B Corridor PA Speaker',
+      type: 'PA_SPEAKER',
+      zone: 'BLOCK_B',
+      location: 'Block B Corridor',
+      controllerId: 'ESP32-CELL-02',
+      gpio: 27,
+      status: 'ONLINE',
+      state: 'IDLE',
+      lastAnnouncement: null,
+      lastPlaybackReport: null,
+      x: 800,
+      y: 195,
+      lastUpdated: new Date().toISOString()
+    },
+    'SPEAKER-BLOCK-C': {
+      id: 'SPEAKER-BLOCK-C',
+      name: 'Block C Corridor PA Speaker',
+      type: 'PA_SPEAKER',
+      zone: 'BLOCK_C',
+      location: 'Block C Corridor',
+      controllerId: 'ESP32-CELL-03',
+      gpio: 27,
+      status: 'ONLINE',
+      state: 'IDLE',
+      lastAnnouncement: null,
+      lastPlaybackReport: null,
+      x: 1230,
+      y: 195,
+      lastUpdated: new Date().toISOString()
+    },
+    'SPEAKER-YARD': {
+      id: 'SPEAKER-YARD',
+      name: 'Common Yard PA Horn',
+      type: 'PA_SPEAKER',
+      zone: 'YARD',
+      location: 'Common Exercise Yard',
+      controllerId: 'ESP32-ACCESS-01',
+      gpio: 4,
+      status: 'ONLINE',
+      state: 'IDLE',
+      lastAnnouncement: null,
+      lastPlaybackReport: null,
+      x: 800,
+      y: 430,
+      lastUpdated: new Date().toISOString()
+    },
+    'SPEAKER-MED': {
+      id: 'SPEAKER-MED',
+      name: 'Medical Ward Intercom Node',
+      type: 'PA_SPEAKER',
+      zone: 'MEDICAL',
+      location: 'Medical Ward',
+      controllerId: 'ESP32-MED-01',
+      gpio: 13,
+      status: 'ONLINE',
+      state: 'IDLE',
+      lastAnnouncement: null,
+      lastPlaybackReport: null,
+      x: 370,
+      y: 420,
+      lastUpdated: new Date().toISOString()
+    },
+    'SPEAKER-ADMIN': {
+      id: 'SPEAKER-ADMIN',
+      name: 'Admin Building PA Horn',
+      type: 'PA_SPEAKER',
+      zone: 'ADMIN',
+      location: 'Administration Building',
+      controllerId: 'ESP32-ACCESS-01',
+      gpio: 5,
+      status: 'ONLINE',
+      state: 'IDLE',
+      lastAnnouncement: null,
+      lastPlaybackReport: null,
+      x: 1150,
+      y: 410,
+      lastUpdated: new Date().toISOString()
+    },
+    'SPEAKER-SPINE': {
+      id: 'SPEAKER-SPINE',
+      name: 'Central Secure Spine PA Node',
+      type: 'PA_SPEAKER',
+      zone: 'SPINE',
+      location: 'Central Secure Spine',
+      controllerId: 'ESP32-ACCESS-01',
+      gpio: 12,
+      status: 'ONLINE',
+      state: 'IDLE',
+      lastAnnouncement: null,
+      lastPlaybackReport: null,
+      x: 800,
+      y: 600,
+      lastUpdated: new Date().toISOString()
+    }
+  },
+
+  // Cell & Corridor Doors (Separating Physical Position vs Lock State)
+  doors: {
+    // Block A Doors
+    'DOOR-A101': { id: 'DOOR-A101', name: 'Cell A-101 Door', location: 'Cell A-101', block: 'A', position: 'CLOSED', lockState: 'LOCKED', reedId: 'REED-A101', lockId: 'LOCK-A101', controllerId: 'ESP32-CELL-01', x: 285, y: 170, lastUpdated: new Date().toISOString() },
+    'DOOR-A102': { id: 'DOOR-A102', name: 'Cell A-102 Door', location: 'Cell A-102', block: 'A', position: 'CLOSED', lockState: 'LOCKED', reedId: 'REED-A102', lockId: 'LOCK-A102', controllerId: 'ESP32-CELL-01', x: 340, y: 170, lastUpdated: new Date().toISOString() },
+    'DOOR-A103': { id: 'DOOR-A103', name: 'Cell A-103 Door', location: 'Cell A-103', block: 'A', position: 'CLOSED', lockState: 'LOCKED', reedId: 'REED-A103', lockId: 'LOCK-A103', controllerId: 'ESP32-CELL-01', x: 395, y: 170, lastUpdated: new Date().toISOString() },
+    'DOOR-A104': { id: 'DOOR-A104', name: 'Cell A-104 Door', location: 'Cell A-104', block: 'A', position: 'CLOSED', lockState: 'LOCKED', reedId: 'REED-A104', lockId: 'LOCK-A104', controllerId: 'ESP32-CELL-01', x: 450, y: 170, lastUpdated: new Date().toISOString() },
+
+    // Block B Doors
+    'DOOR-B101': { id: 'DOOR-B101', name: 'Cell B-101 Door', location: 'Cell B-101', block: 'B', position: 'CLOSED', lockState: 'LOCKED', reedId: 'REED-B101', lockId: 'LOCK-B101', controllerId: 'ESP32-CELL-02', x: 715, y: 170, lastUpdated: new Date().toISOString() },
+    'DOOR-B102': { id: 'DOOR-B102', name: 'Cell B-102 Door', location: 'Cell B-102', block: 'B', position: 'CLOSED', lockState: 'LOCKED', reedId: 'REED-B102', lockId: 'LOCK-B102', controllerId: 'ESP32-CELL-02', x: 770, y: 170, lastUpdated: new Date().toISOString() },
+    'DOOR-B103': { id: 'DOOR-B103', name: 'Cell B-103 Door', location: 'Cell B-103', block: 'B', position: 'CLOSED', lockState: 'LOCKED', reedId: 'REED-B103', lockId: 'LOCK-B103', controllerId: 'ESP32-CELL-02', x: 825, y: 170, lastUpdated: new Date().toISOString() },
+    'DOOR-B104': { id: 'DOOR-B104', name: 'Cell B-104 Door', location: 'Cell B-104', block: 'B', position: 'CLOSED', lockState: 'LOCKED', reedId: 'REED-B104', lockId: 'LOCK-B104', controllerId: 'ESP32-CELL-02', x: 880, y: 170, lastUpdated: new Date().toISOString() },
+
+    // Block C Doors
+    'DOOR-C101': { id: 'DOOR-C101', name: 'Cell C-101 Door', location: 'Cell C-101', block: 'C', position: 'CLOSED', lockState: 'LOCKED', reedId: 'REED-C101', lockId: 'LOCK-C101', controllerId: 'ESP32-CELL-03', x: 1145, y: 170, lastUpdated: new Date().toISOString() },
+    'DOOR-C102': { id: 'DOOR-C102', name: 'Cell C-102 Door', location: 'Cell C-102', block: 'C', position: 'CLOSED', lockState: 'LOCKED', reedId: 'REED-C102', lockId: 'LOCK-C102', controllerId: 'ESP32-CELL-03', x: 1200, y: 170, lastUpdated: new Date().toISOString() },
+    'DOOR-C103': { id: 'DOOR-C103', name: 'Cell C-103 Door', location: 'Cell C-103', block: 'C', position: 'CLOSED', lockState: 'LOCKED', reedId: 'REED-C103', lockId: 'LOCK-C103', controllerId: 'ESP32-CELL-03', x: 1255, y: 170, lastUpdated: new Date().toISOString() },
+    'DOOR-C104': { id: 'DOOR-C104', name: 'Cell C-104 Door', location: 'Cell C-104', block: 'C', position: 'CLOSED', lockState: 'LOCKED', reedId: 'REED-C104', lockId: 'LOCK-C104', controllerId: 'ESP32-CELL-03', x: 1310, y: 170, lastUpdated: new Date().toISOString() },
+
+    // Isolation Doors
+    'DOOR-ISO01': { id: 'DOOR-ISO01', name: 'Solitary Cell ISO-01 Door', location: 'Isolation ISO-01', block: 'ISO', position: 'CLOSED', lockState: 'LOCKED', reedId: 'REED-ISO01', lockId: 'LOCK-ISO01', controllerId: 'ESP32-MED-01', x: 310, y: 725, lastUpdated: new Date().toISOString() },
+    'DOOR-ISO02': { id: 'DOOR-ISO02', name: 'Solitary Cell ISO-02 Door', location: 'Isolation ISO-02', block: 'ISO', position: 'CLOSED', lockState: 'LOCKED', reedId: 'REED-ISO02', lockId: 'LOCK-ISO02', controllerId: 'ESP32-MED-01', x: 390, y: 725, lastUpdated: new Date().toISOString() }
+  },
+
   // Controllers (ESP32 Nodes)
   controllers: {
     'ESP32-CELL-01': {
@@ -306,7 +483,7 @@ export const INITIAL_STATE = {
     }
   },
 
-  // Personnel (Prisoners and Officers)
+  // Personnel (Prisoners, Officers, Supervisors, Medical Staff)
   people: {
     // Prisoners
     'P-1044': {
@@ -314,6 +491,7 @@ export const INITIAL_STATE = {
       name: 'Marcus Vance',
       alias: 'Apex',
       type: 'PRISONER',
+      category: 'PRISONER',
       assignedCell: 'Cell A-102',
       securityRisk: 'HIGH_SECURITY',
       currentRoom: 'Cell A-102',
@@ -323,12 +501,20 @@ export const INITIAL_STATE = {
       targetWaypoint: null,
       path: [],
       activity: 'Resting in Cell',
-      status: 'NORMAL', // 'NORMAL' | 'ALERT' | 'IN_TRANSIT' | 'RESTRICTED'
+      status: 'NORMAL',
       trackingStatus: 'SIMULATED TRACKING',
       beaconFrequencyHz: 433.92,
       batteryLevel: 94,
       lastLocationUpdate: new Date().toISOString(),
       associatedIncident: null,
+      fictionalNote: 'Fictional demonstration profile for academic simulation.',
+      caseBackground: 'Fictional logistics planner convicted in simulated financial espionage scenario. Shows compliant behavior under current custodial profile.',
+      emergencyContact: 'Fictional Legal Representative: H. Vance (Attorney-at-Law)',
+      interviewHistory: [
+        { date: '2026-09-12', interviewer: 'Sgt. A. Cole', summary: 'Routine quarterly custodial review. Inmate requested additional library privileges.' },
+        { date: '2026-10-15', interviewer: 'Lt. M. Sterling', summary: 'Work detail assignment interview for Block A laundry supervision.' }
+      ],
+      medicalHistory: 'Vitals stable. No chronic medical interventions required.',
       routeHistory: [
         { room: 'Cell A-102', x: 340, y: 140, timestamp: new Date(Date.now() - 3600000).toISOString() }
       ]
@@ -338,6 +524,7 @@ export const INITIAL_STATE = {
       name: 'David Chen',
       alias: 'Specter',
       type: 'PRISONER',
+      category: 'PRISONER',
       assignedCell: 'Cell B-102',
       securityRisk: 'MEDIUM',
       currentRoom: 'Cell B-102',
@@ -353,6 +540,13 @@ export const INITIAL_STATE = {
       batteryLevel: 88,
       lastLocationUpdate: new Date().toISOString(),
       associatedIncident: null,
+      fictionalNote: 'Fictional demonstration profile for academic simulation.',
+      caseBackground: 'Fictional cyber operations specialist in simulated infrastructure breach scenario. Low physical risk profile.',
+      emergencyContact: 'Fictional Sister: Linda Chen',
+      interviewHistory: [
+        { date: '2026-10-02', interviewer: 'Dr. E. Reed', summary: 'Welfare assessment regarding vocational training in digital maintenance.' }
+      ],
+      medicalHistory: 'Mild astigmatism; corrective lenses issued.',
       routeHistory: [
         { room: 'Cell B-102', x: 770, y: 140, timestamp: new Date(Date.now() - 7200000).toISOString() }
       ]
@@ -362,6 +556,7 @@ export const INITIAL_STATE = {
       name: 'Jackson Miller',
       alias: 'Jackrabbit',
       type: 'PRISONER',
+      category: 'PRISONER',
       assignedCell: 'Cell C-101',
       securityRisk: 'LOW',
       currentRoom: 'Cell C-101',
@@ -377,6 +572,13 @@ export const INITIAL_STATE = {
       batteryLevel: 91,
       lastLocationUpdate: new Date().toISOString(),
       associatedIncident: null,
+      fictionalNote: 'Fictional demonstration profile for academic simulation.',
+      caseBackground: 'Fictional property trespass scenario. Assigned to kitchen work crew.',
+      emergencyContact: 'Fictional Uncle: Thomas Miller',
+      interviewHistory: [
+        { date: '2026-08-20', interviewer: 'Capt. J. Reyes', summary: 'Good conduct review.' }
+      ],
+      medicalHistory: 'Standard seasonal allergy profile.',
       routeHistory: []
     },
     'P-4412': {
@@ -384,6 +586,7 @@ export const INITIAL_STATE = {
       name: 'Sarah Connor',
       alias: 'Valkyrie',
       type: 'PRISONER',
+      category: 'PRISONER',
       assignedCell: 'Medical Ward',
       securityRisk: 'SPECIAL_CARE',
       currentRoom: 'Medical Ward - Patient Bed 1',
@@ -399,6 +602,14 @@ export const INITIAL_STATE = {
       batteryLevel: 82,
       lastLocationUpdate: new Date().toISOString(),
       associatedIncident: 'INC-MED-01',
+      fictionalNote: 'Fictional demonstration profile inspired by science-fiction literature and cinematic narrative.',
+      caseBackground: 'Retained under special observational protocol following simulated incident involving automated factory defense systems and reports regarding artificial intelligence network Skynet. Demonstrates high tactical fitness and cooperative demeanor during medical evaluations.',
+      emergencyContact: 'Son (Fictional): John Connor (Listed in care of approved guardian)',
+      interviewHistory: [
+        { date: '2026-07-14', interviewer: 'Dr. E. Reed', summary: 'Subject expressed persistent concern regarding automated weapons testing. Calm, coherent, and physically disciplined.' },
+        { date: '2026-09-28', interviewer: 'Sgt. A. Cole', summary: 'Security debriefing regarding electronic perimeter integrity. Offered constructive security observations.' }
+      ],
+      medicalHistory: 'Previous shoulder fracture fully healed; routine physical therapy completed.',
       routeHistory: []
     },
     'P-5590': {
@@ -406,6 +617,7 @@ export const INITIAL_STATE = {
       name: 'Tyler Durden',
       alias: 'Ghost',
       type: 'PRISONER',
+      category: 'PRISONER',
       assignedCell: 'Isolation Cell ISO-01',
       securityRisk: 'MAXIMUM_ISOLATION',
       currentRoom: 'Isolation Cell ISO-01',
@@ -421,6 +633,14 @@ export const INITIAL_STATE = {
       batteryLevel: 79,
       lastLocationUpdate: new Date().toISOString(),
       associatedIncident: null,
+      fictionalNote: 'Fictional demonstration profile inspired by underground resistance cinema narrative.',
+      caseBackground: 'Fictional founder of Paper Street Soap Company in simulated subversive credit record erasure scenario. Subject demonstrates dual-identity ideation. Monitored in Solitary Confinement unit ISO-01 for administrative safety.',
+      emergencyContact: 'Fictional Acquaintance: Marla Singer',
+      interviewHistory: [
+        { date: '2026-08-03', interviewer: 'Dr. E. Reed', summary: 'Evaluated sleep disturbances and dissociative episodes. Recommended quiet sensory environment.' },
+        { date: '2026-10-10', interviewer: 'Capt. J. Reyes', summary: 'Discussion of rules regarding cell organization. Inmate responded with enigmatic philosophical remarks.' }
+      ],
+      medicalHistory: 'Chronic insomnia; melatonin therapy administered under supervision.',
       routeHistory: []
     },
     'P-6120': {
@@ -428,6 +648,7 @@ export const INITIAL_STATE = {
       name: 'Robert Paulson',
       alias: 'Moose',
       type: 'PRISONER',
+      category: 'PRISONER',
       assignedCell: 'Cell B-104',
       securityRisk: 'MEDIUM',
       currentRoom: 'Common Exercise Yard',
@@ -443,6 +664,13 @@ export const INITIAL_STATE = {
       batteryLevel: 95,
       lastLocationUpdate: new Date().toISOString(),
       associatedIncident: null,
+      fictionalNote: 'Fictional demonstration profile for academic simulation.',
+      caseBackground: 'Former competitive bodybuilder involved in simulated support group assembly. Calm, courteous, and cooperative with staff.',
+      emergencyContact: 'Support Coordinator: M. Singer',
+      interviewHistory: [
+        { date: '2026-09-01', interviewer: 'Lt. M. Sterling', summary: 'Applied for yard maintenance equipment coordinator position.' }
+      ],
+      medicalHistory: 'Endocrine hormonal supplement therapy monitored by Dr. Reed.',
       routeHistory: []
     },
 
@@ -451,6 +679,7 @@ export const INITIAL_STATE = {
       id: 'OFC-702',
       name: 'Capt. John Reyes',
       type: 'OFFICER',
+      category: 'OFFICER',
       badge: 'OFC-702',
       rfidCardId: 'CARD-OFC-702',
       assignedZone: 'East Perimeter & Sally Port',
@@ -463,6 +692,8 @@ export const INITIAL_STATE = {
       activity: 'Perimeter Fence Inspection',
       patrolState: 'ACTIVE_PATROL',
       status: 'NORMAL',
+      shift: 'Day Shift (06:00 - 18:00)',
+      dutyStatus: 'ON_DUTY',
       trackingStatus: 'SIMULATED TRACKING',
       beaconFrequencyHz: 868.0,
       batteryLevel: 99,
@@ -474,6 +705,7 @@ export const INITIAL_STATE = {
       id: 'OFC-514',
       name: 'Lt. Michael Sterling',
       type: 'OFFICER',
+      category: 'OFFICER',
       badge: 'OFC-514',
       rfidCardId: 'CARD-OFC-514',
       assignedZone: 'Cell Blocks A & B',
@@ -486,32 +718,11 @@ export const INITIAL_STATE = {
       activity: 'Routine Cell Block Check',
       patrolState: 'ACTIVE_PATROL',
       status: 'NORMAL',
+      shift: 'Day Shift (06:00 - 18:00)',
+      dutyStatus: 'ON_DUTY',
       trackingStatus: 'SIMULATED TRACKING',
       beaconFrequencyHz: 868.0,
       batteryLevel: 97,
-      lastLocationUpdate: new Date().toISOString(),
-      associatedIncident: null,
-      routeHistory: []
-    },
-    'OFC-309': {
-      id: 'OFC-309',
-      name: 'Sgt. Amanda Cole',
-      type: 'OFFICER',
-      badge: 'OFC-309',
-      rfidCardId: 'CARD-OFC-309',
-      assignedZone: 'Central Control (SOC)',
-      currentRoom: 'Control Room - SOC Terminal A',
-      currentWaypoint: 'W_CONTROL_1',
-      x: 1140,
-      y: 720,
-      targetWaypoint: null,
-      path: [],
-      activity: 'SOC Monitoring & Command',
-      patrolState: 'STATIONARY_POST',
-      status: 'NORMAL',
-      trackingStatus: 'SIMULATED TRACKING',
-      beaconFrequencyHz: 868.0,
-      batteryLevel: 100,
       lastLocationUpdate: new Date().toISOString(),
       associatedIncident: null,
       routeHistory: []
@@ -520,6 +731,7 @@ export const INITIAL_STATE = {
       id: 'OFC-118',
       name: 'Officer David Kim',
       type: 'OFFICER',
+      category: 'OFFICER',
       badge: 'OFC-118',
       rfidCardId: 'CARD-OFC-118',
       assignedZone: 'Medical & Sally Port Guard',
@@ -532,9 +744,93 @@ export const INITIAL_STATE = {
       activity: 'Escort Duty & Checkpoint Guard',
       patrolState: 'ACTIVE_PATROL',
       status: 'NORMAL',
+      shift: 'Day Shift (06:00 - 18:00)',
+      dutyStatus: 'ON_DUTY',
       trackingStatus: 'SIMULATED TRACKING',
       beaconFrequencyHz: 868.0,
       batteryLevel: 92,
+      lastLocationUpdate: new Date().toISOString(),
+      associatedIncident: null,
+      routeHistory: []
+    },
+
+    // Supervisor
+    'SUP-309': {
+      id: 'SUP-309',
+      name: 'Sgt. Amanda Cole',
+      type: 'SUPERVISOR',
+      category: 'SUPERVISOR',
+      badge: 'SUP-309',
+      rfidCardId: 'CARD-SUP-309',
+      assignedZone: 'Central Control (SOC)',
+      currentRoom: 'Control Room - SOC Terminal A',
+      currentWaypoint: 'W_CONTROL_1',
+      x: 1140,
+      y: 720,
+      targetWaypoint: null,
+      path: [],
+      activity: 'SOC Monitoring & Command',
+      patrolState: 'STATIONARY_POST',
+      status: 'NORMAL',
+      shift: 'Day Shift (06:00 - 18:00)',
+      dutyStatus: 'ON_DUTY_SUPERVISOR',
+      trackingStatus: 'SIMULATED TRACKING',
+      beaconFrequencyHz: 868.0,
+      batteryLevel: 100,
+      lastLocationUpdate: new Date().toISOString(),
+      associatedIncident: null,
+      routeHistory: []
+    },
+
+    // Medical Staff
+    'DOC-401': {
+      id: 'DOC-401',
+      name: 'Dr. Evelyn Reed, MD',
+      type: 'MEDICAL_DOCTOR',
+      category: 'MEDICAL',
+      badge: 'DOC-401',
+      rfidCardId: 'CARD-DOC-401',
+      assignedZone: 'Medical & Welfare Ward',
+      currentRoom: 'Medical Ward - Triage',
+      currentWaypoint: 'W_MED_1',
+      x: 380,
+      y: 450,
+      targetWaypoint: null,
+      path: [],
+      activity: 'Medical Clinic Rounds & Patient Review',
+      patrolState: 'CLINICAL_ROUNDS',
+      status: 'NORMAL',
+      shift: 'Medical Shift (08:00 - 17:00)',
+      dutyStatus: 'ON_DUTY_MEDICAL',
+      trackingStatus: 'SIMULATED TRACKING',
+      beaconFrequencyHz: 868.0,
+      batteryLevel: 96,
+      lastLocationUpdate: new Date().toISOString(),
+      associatedIncident: null,
+      routeHistory: []
+    },
+    'NRS-402': {
+      id: 'NRS-402',
+      name: 'Elena Rostova, RN',
+      type: 'MEDICAL_NURSE',
+      category: 'MEDICAL',
+      badge: 'NRS-402',
+      rfidCardId: 'CARD-NRS-402',
+      assignedZone: 'Medical Ward Checkpoint',
+      currentRoom: 'Medical Ward Checkpoint',
+      currentWaypoint: 'W_MED_ENTRY',
+      x: 420,
+      y: 395,
+      targetWaypoint: null,
+      path: [],
+      activity: 'Dispensing Scheduled Medication',
+      patrolState: 'MEDICATION_DISPENSE',
+      status: 'NORMAL',
+      shift: 'Medical Shift (07:30 - 16:30)',
+      dutyStatus: 'ON_DUTY_MEDICAL',
+      trackingStatus: 'SIMULATED TRACKING',
+      beaconFrequencyHz: 868.0,
+      batteryLevel: 94,
       lastLocationUpdate: new Date().toISOString(),
       associatedIncident: null,
       routeHistory: []
