@@ -4,6 +4,7 @@ import { SocketProvider, useSocket } from './context/SocketContext';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import Dashboard from './pages/Dashboard';
+import CctvMonitoring from './pages/CctvMonitoring';
 import FacilityOverview from './pages/FacilityOverview';
 import PeopleTracking from './pages/PeopleTracking';
 import AccessControl from './pages/AccessControl';
@@ -44,6 +45,7 @@ function AuthenticatedApp() {
         <Sidebar activeTab={activeTab} onSelectTab={setActiveTab} />
         <main className="flex-1 overflow-y-auto bg-[#0b0f19]">
           {activeTab === 'dashboard' && <Dashboard onNavigateTab={setActiveTab} />}
+          {activeTab === 'cctv' && <CctvMonitoring />}
           {activeTab === 'facility' && <FacilityOverview />}
           {activeTab === 'tracking' && <PeopleTracking />}
           {activeTab === 'access' && <AccessControl />}

@@ -18,8 +18,14 @@ import {
   Volume2,
   Play,
   Pause,
-  FastForward
+  FastForward,
+  Video,
+  Send,
+  Radio,
+  Eye,
+  PlayCircle
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import MiniFacilityMap from '../components/MiniFacilityMap';
 import ConfirmationModal from '../components/ConfirmationModal';
@@ -27,13 +33,32 @@ import CommunicationMonitor from '../components/CommunicationMonitor';
 import { SIMULATOR_URL } from '../config';
 
 export default function Dashboard({ onNavigateTab }) {
-  const { state, commandGate, ackIncident, broadcastAnnouncement, activateLockdown, releaseLockdown, controlClock } = useSocket();
+  const { user } = useAuth();
+  const {
+    state,
+    commandGate,
+    ackIncident,
+    broadcastAnnouncement,
+    activateLockdown,
+    releaseLockdown,
+    controlClock,
+    respondToRadioRequest,
+    dispatchOfficerTask,
+    startControlledEscape,
+    startMassEscape
+  } = useSocket();
   const [selectedGate, setSelectedGate] = useState(null);
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', action: null, isDanger: true });
   const [announcementModal, setAnnouncementModal] = useState(false);
   const [announcementTitle, setAnnouncementTitle] = useState('');
   const [announcementMsg, setAnnouncementMsg] = useState('');
   const [announcementZones, setAnnouncementZones] = useState(['ALL']);
+
+  // Administrator-to-Officer Task Dispatch state
+  const [targetOfficerId, setTargetOfficerId] = useState('OFC-514');
+  const [taskTemplate, setTaskTemplate] = useState('REPORT_TO_NORTH');
+  const [taskNote, setTaskNote] = useState('');
+  const [taskFeedback, setTaskFeedback] = useState(null);
 
   const gatesList = state?.gates ? Object.values(state.gates) : [];
   const incidents = state?.incidents || [];
@@ -93,6 +118,46 @@ export default function Dashboard({ onNavigateTab }) {
     setAnnouncementModal(false);
     setAnnouncementTitle('');
     setAnnouncementMsg('');
+  };
+
+  const handleDispatchTask = async (e) => {
+    e.preventDefault();
+    setTaskFeedback(null);
+
+    let commandType = 'PATROL_ZONE';
+    let targetWaypointId = 'W_NORTH_A';
+
+    if (taskTemplate === 'REPORT_TO_NORTH') {
+      commandType = 'REPORT_TO';
+      targetWaypointId = 'W_NORTH_A';
+    } else if (taskTemplate === 'GUARD_CELL_C02') {
+      commandType = 'GUARD_CELL';
+      targetWaypointId = 'W_C102';
+    } else if (taskTemplate === 'PATROL_EAST_PERIMETER') {
+      commandType = 'PATROL_ZONE';
+      targetWaypointId = 'W_PERIM_EAST_N';
+    } else if (taskTemplate === 'REPORT_MEDICAL') {
+      commandType = 'REPORT_MEDICAL';
+      targetWaypointId = 'W_MED_1';
+    } else if (taskTemplate === 'INSPECT_SALLY_PORT') {
+      commandType = 'INSPECT_GATE';
+      targetWaypointId = 'W_SALLY_BAY';
+    }
+
+    try {
+      const res = await dispatchOfficerTask({
+        officerId: targetOfficerId,
+        commandType,
+        targetWaypointId,
+        note: taskNote || 'Administrative dispatch order',
+        priority: 'NORMAL'
+      });
+      setTaskFeedback({ success: true, message: `Dispatched order to ${targetOfficerId}: Proceeding to ${res.task?.destinationRoom}` });
+      setTaskNote('');
+      setTimeout(() => setTaskFeedback(null), 6000);
+    } catch (err) {
+      setTaskFeedback({ success: false, message: err.message });
+    }
   };
 
   return (
@@ -194,6 +259,70 @@ export default function Dashboard({ onNavigateTab }) {
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* Authenticated Operator Session Card (Section 7) */}
+      <div className="bg-[#111827] border border-borderMuted rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-4 text-xs">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center text-white font-extrabold text-sm border border-cyan-400/40 shadow-md">
+            {user?.name ? user.name.split(' ').map(n=>n[0]).join('') : 'OP'}
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-gray-400">Authenticated Central Security Operator:</span>
+              <strong className="text-white text-sm">{user?.name || 'S. Patel'}</strong>
+              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                ROLE: {user?.role || 'ADMIN'}
+              </span>
+            </div>
+            <span className="text-[11px] text-gray-400 font-mono">
+              User ID: {user?.id || 'USR-001'} • Application Privilege: {user?.title || 'Senior Security Administrator'} • Badge: {user?.badge || 'SEC-ADMIN-01'}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 text-[11px] text-gray-400 font-mono">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span>SESSION: ACTIVE (JWT TOKEN VALIDATED)</span>
+        </div>
+      </div>
+
+      {/* Pending Officer Radio Assistance Requests (Workflow A - Section 5.1) */}
+      {state?.officerRadioRequests && state.officerRadioRequests.filter(r => r.status === 'PENDING').length > 0 && (
+        <div className="space-y-2">
+          {state.officerRadioRequests.filter(r => r.status === 'PENDING').map(req => (
+            <div
+              key={req.id}
+              className="p-3.5 bg-gradient-to-r from-amber-950/70 via-slate-900 to-amber-950/40 border border-amber-500/70 rounded-xl flex flex-wrap items-center justify-between gap-4 shadow-xl animate-in fade-in"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/40 animate-pulse">
+                  <Radio className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-white text-xs">OFFICER RADIO CALL • {req.officerName} ({req.officerId})</span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-900/60 text-amber-300 font-bold border border-amber-500/30">
+                      WORKFLOW A: ASSISTANCE REQUESTED
+                    </span>
+                  </div>
+                  <p className="text-xs text-amber-200 mt-0.5 font-semibold">"{req.message}"</p>
+                  <span className="text-[10px] text-gray-400 font-mono">Target Barrier: {req.doorId} • Location: {req.cell} • Escorted Inmate: {req.prisonerName}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => respondToRadioRequest(req.id, 'CLOSE_CELL')}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg shadow-lg shadow-emerald-950/50 flex items-center gap-1.5 transition"
+                >
+                  <DoorClosed className="w-4 h-4" />
+                  <span>Close & Lock {req.cell}</span>
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
@@ -557,6 +686,116 @@ export default function Dashboard({ onNavigateTab }) {
                 <FileText className="w-3 h-3" />
                 <span>Generate Shift Audit Report</span>
               </button>
+            </div>
+          </div>
+
+          {/* Administrator-to-Officer Task Dispatch (Section 6) */}
+          <div className="bg-[#111827] border border-borderMuted rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-borderMuted">
+              <div className="flex items-center gap-2">
+                <Send className="w-4 h-4 text-cyan-400" />
+                <span className="text-xs font-bold text-white tracking-wide">Administrator-to-Officer Task Dispatch</span>
+              </div>
+              <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-800">
+                Encrypted Tactical Link
+              </span>
+            </div>
+
+            <form onSubmit={handleDispatchTask} className="grid grid-cols-1 sm:grid-cols-12 gap-3 text-xs items-end">
+              <div className="sm:col-span-4">
+                <label className="text-gray-400 text-[10px] uppercase font-bold block mb-1">Target Officer</label>
+                <select
+                  value={targetOfficerId}
+                  onChange={(e) => setTargetOfficerId(e.target.value)}
+                  className="w-full bg-[#0b0f19] border border-borderMuted rounded-lg px-2.5 py-1.5 text-gray-200 focus:outline-none focus:border-cyan-500 font-mono text-xs"
+                >
+                  <option value="OFC-514">Lt. Michael Sterling (Blocks A/B)</option>
+                  <option value="OFC-702">Capt. John Reyes (Perimeter)</option>
+                  <option value="OFC-118">Officer David Kim (Medical/Intake)</option>
+                </select>
+              </div>
+
+              <div className="sm:col-span-5">
+                <label className="text-gray-400 text-[10px] uppercase font-bold block mb-1">Assignment Template</label>
+                <select
+                  value={taskTemplate}
+                  onChange={(e) => setTaskTemplate(e.target.value)}
+                  className="w-full bg-[#0b0f19] border border-borderMuted rounded-lg px-2.5 py-1.5 text-gray-200 focus:outline-none focus:border-cyan-500 font-mono text-xs"
+                >
+                  <option value="REPORT_TO_NORTH">Report to North Wing (W_NORTH_A)</option>
+                  <option value="GUARD_CELL_C02">Guard Cell C-02 (W_C102)</option>
+                  <option value="PATROL_EAST_PERIMETER">Patrol East Perimeter (W_PERIM_EAST_N)</option>
+                  <option value="REPORT_MEDICAL">Report to Medical Section (W_MED_1)</option>
+                  <option value="INSPECT_SALLY_PORT">Inspect Sally Port Intake (W_SALLY_BAY)</option>
+                </select>
+              </div>
+
+              <div className="sm:col-span-3">
+                <button
+                  type="submit"
+                  className="w-full py-1.5 px-3 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-lg shadow-md flex items-center justify-center gap-1.5 transition text-xs"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Dispatch</span>
+                </button>
+              </div>
+            </form>
+
+            {taskFeedback && (
+              <div className={`p-2.5 rounded-lg border text-xs flex items-center gap-2 font-mono ${
+                taskFeedback.success ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300' : 'bg-red-950/40 border-red-500/50 text-red-300'
+              }`}>
+                {taskFeedback.success ? <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" /> : <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />}
+                <span>{taskFeedback.message}</span>
+              </div>
+            )}
+          </div>
+
+          {/* CCTV Surveillance Mini Feeds Strip (Section 11) */}
+          <div className="bg-[#111827] border border-borderMuted rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-borderMuted">
+              <div className="flex items-center gap-2">
+                <Video className="w-4 h-4 text-cyan-400" />
+                <span className="text-xs font-bold text-white tracking-wide">Live CCTV Feeds & Optical Perception</span>
+              </div>
+              <button
+                onClick={() => onNavigateTab && onNavigateTab('cctv')}
+                className="text-[11px] text-cyan-400 hover:underline flex items-center gap-1"
+              >
+                <span>View All 8 Cameras</span>
+                <ArrowRight className="w-3 h-3" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {['CAM-01', 'CAM-02', 'CAM-03'].map(camId => {
+                const cam = state?.cameras?.[camId];
+                if (!cam) return null;
+                const isOnline = cam.status === 'ONLINE';
+                const count = cam.visibleEntities?.length || 0;
+                return (
+                  <div
+                    key={cam.id}
+                    onClick={() => onNavigateTab && onNavigateTab('cctv')}
+                    className="bg-[#0b0f19] border border-slate-800 rounded-lg p-2.5 hover:border-cyan-500/50 cursor-pointer transition space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between text-[11px]">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-red-500'}`}></span>
+                        <strong className="text-white font-mono">{cam.id}</strong>
+                      </div>
+                      <span className="text-[10px] text-gray-400">{cam.location}</span>
+                    </div>
+                    <div className="h-16 bg-[#060a12] rounded border border-slate-900 flex items-center justify-center text-[10px] font-mono text-cyan-300">
+                      {isOnline ? (
+                        <span>{count > 0 ? `👁 ${count} Targets in FOV` : '● Live Stream'}</span>
+                      ) : (
+                        <span className="text-red-400">Offline</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

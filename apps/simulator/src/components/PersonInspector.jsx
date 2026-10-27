@@ -125,12 +125,14 @@ export default function PersonInspector({ person, onClose, isFollowing, onToggle
               <strong className="text-gray-200">{person.assignedCell || person.assignedZone}</strong>
             </div>
             <div className="p-2.5 bg-[#080d1a] border border-slate-800 rounded-lg">
-              <span className="text-gray-400 text-[10px] block">Current Status</span>
-              <strong className={person.status === 'NORMAL' ? 'text-emerald-400' : 'text-amber-400'}>{person.status}</strong>
+              <span className="text-gray-400 text-[10px] block">Current Status / Role State</span>
+              <strong className={person.status === 'NORMAL' ? 'text-emerald-400' : 'text-amber-400'}>
+                {isOfficer ? (person.officerState || person.status) : person.status}
+              </strong>
             </div>
             <div className="p-2.5 bg-[#080d1a] border border-slate-800 rounded-lg">
-              <span className="text-gray-400 text-[10px] block">Current Activity</span>
-              <span className="text-gray-300">{person.activity}</span>
+              <span className="text-gray-400 text-[10px] block">{isPrisoner ? 'Behavior Profile' : 'Current Task'}</span>
+              <span className="text-cyan-300 font-semibold">{isPrisoner ? (person.profile || 'ROUTINE') : (person.currentAssignment?.type || 'ROUTINE_PATROL')}</span>
             </div>
             <div className="p-2.5 bg-[#080d1a] border border-slate-800 rounded-lg">
               <span className="text-gray-400 text-[10px] block">Simulated Beacon</span>

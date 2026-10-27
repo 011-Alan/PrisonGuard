@@ -14,6 +14,17 @@ import {
   Zap
 } from 'lucide-react';
 
+function getCameraFovPath(cx, cy, angleDeg, fovDeg, distance) {
+  const startAngle = ((angleDeg - fovDeg / 2) * Math.PI) / 180;
+  const endAngle = ((angleDeg + fovDeg / 2) * Math.PI) / 180;
+  const x1 = cx + distance * Math.cos(startAngle);
+  const y1 = cy + distance * Math.sin(startAngle);
+  const x2 = cx + distance * Math.cos(endAngle);
+  const y2 = cy + distance * Math.sin(endAngle);
+  const largeArcFlag = fovDeg > 180 ? 1 : 0;
+  return `M ${cx} ${cy} L ${x1} ${y1} A ${distance} ${distance} 0 ${largeArcFlag} 1 ${x2} ${y2} Z`;
+}
+
 export default function PrisonFloorPlan({
   zoom,
   pan,
@@ -37,6 +48,7 @@ export default function PrisonFloorPlan({
   const doors = state?.doors ? Object.values(state.doors) : [];
   const speakers = state?.speakers ? Object.values(state.speakers) : [];
   const controllers = state?.controllers ? Object.values(state.controllers) : [];
+  const cameras = state?.cameras ? Object.values(state.cameras) : [];
   const isLockdown = state?.lockdown?.isActive;
 
   // Pan interaction
@@ -597,6 +609,58 @@ export default function PrisonFloorPlan({
                 </g>
               );
             })}
+
+            {/* CCTV Security Cameras & Viewing Cones (Slanted Perspective Ground-Truth) */}
+            {cameras.map((cam) => {
+              const isOnline = cam.status === 'ONLINE';
+              const conePath = getCameraFovPath(cam.x, cam.y, cam.angle, cam.fov, cam.distance);
+              const isSelected = selectedDevice?.id === cam.id;
+              const entityCount = cam.visibleEntities?.length || 0;
+
+              return (
+                <g
+                  key={cam.id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectDevice && onSelectDevice({ ...cam, type: 'CAMERA', value: isOnline ? 'STREAMING' : 'OFFLINE' });
+                  }}
+                  className="cursor-pointer group"
+                >
+                  {/* FOV Wedge Cone */}
+                  <path
+                    d={conePath}
+                    fill={isOnline ? (entityCount > 0 ? '#06b6d4' : '#0284c7') : '#64748b'}
+                    fillOpacity={isOnline ? (entityCount > 0 ? '0.16' : '0.07') : '0.02'}
+                    stroke={isOnline ? (entityCount > 0 ? '#06b6d4' : '#0284c7') : '#64748b'}
+                    strokeWidth="1.2"
+                    strokeDasharray="4,3"
+                    opacity={isOnline ? '0.85' : '0.25'}
+                  />
+
+                  {/* Selection Ring */}
+                  {isSelected && (
+                    <circle cx={cam.x} cy={cam.y} r="16" fill="none" stroke="#38bdf8" strokeWidth="2.5" className="animate-pulse" />
+                  )}
+
+                  {/* Camera Body Icon */}
+                  <circle cx={cam.x} cy={cam.y} r="8" fill="#0f172a" stroke={isOnline ? '#06b6d4' : '#ef4444'} strokeWidth="1.5" />
+                  <circle cx={cam.x} cy={cam.y} r="3" fill={isOnline ? (entityCount > 0 ? '#38bdf8' : '#10b981') : '#ef4444'} className={isOnline && entityCount > 0 ? 'animate-ping' : ''} />
+
+                  {/* Camera Label Tag */}
+                  <text
+                    x={cam.x}
+                    y={cam.y - 12}
+                    fill={isOnline ? '#38bdf8' : '#94a3b8'}
+                    fontSize="7.5"
+                    fontWeight="bold"
+                    textAnchor="middle"
+                    className="drop-shadow select-none pointer-events-none"
+                  >
+                    {cam.id} {entityCount > 0 ? `(${entityCount}👁)` : ''}
+                  </text>
+                </g>
+              );
+            })}
           </g>
         )}
 
@@ -721,6 +785,128 @@ export default function PrisonFloorPlan({
               >
                 {person.id}
               </text>
+
+              {/* Floating Message Bubble (Officer Radio / Communication) */}
+              {person.messageBubble && person.messageBubble.text && (
+                <g className="animate-bounce" style={{ animationDuration: '2.5s' }}>
+                  <rect
+                    x={person.x - 90}
+                    y={person.y - 42}
+                    width="180"
+                    height="22"
+                    rx="5"
+                    fill="#0b0f19"
+                    stroke="#06b6d4"
+                    strokeWidth="1.5"
+                    opacity="0.95"
+                  />
+                  <polygon
+                    points={`${person.x - 5},${person.y - 20} ${person.x + 5},${person.y - 20} ${person.x},${person.y - 14}`}
+                    fill="#06b6d4"
+                  />
+                  <text
+                    x={person.x}
+                    y={person.y - 28}
+                    fill="#38bdf8"
+                    fontSize="7.5"
+                    fontWeight="bold"
+                    textAnchor="middle"
+                    pointerEvents="none"
+                  >
+                    📻 {person.messageBubble.text.length > 34 ? person.messageBubble.text.substring(0, 32) + '...' : person.messageBubble.text}
+                  </text>
+                </g>
+              )}
+
+              {/* RFID Card Badge Presentation Indicator (Workflow B) */}
+              {person.rfidBadgeAction && (
+                <g className="animate-pulse">
+                  <rect
+                    x={person.x - 70}
+                    y={person.y - 38}
+                    width="140"
+                    height="20"
+                    rx="4"
+                    fill="#064e3b"
+                    stroke="#10b981"
+                    strokeWidth="1.5"
+                    opacity="0.95"
+                  />
+                  <text
+                    x={person.x}
+                    y={person.y - 25}
+                    fill="#6ee7b7"
+                    fontSize="7.5"
+                    fontWeight="extrabold"
+                    textAnchor="middle"
+                  >
+                    💳 RFID CARD PRESENTED
+                  </text>
+                </g>
+              )}
+
+              {/* Officer Dynamic State Badge */}
+              {isOfficer && person.officerState && person.officerState !== 'PATROLLING' && (
+                <g>
+                  <rect
+                    x={person.x - 42}
+                    y={person.y + 29}
+                    width="84"
+                    height="13"
+                    rx="3"
+                    fill={
+                      person.officerState === 'INTERCEPTING'
+                        ? '#dc2626'
+                        : person.officerState === 'ESCORTING'
+                        ? '#d97706'
+                        : person.officerState === 'REQUESTING_ACCESS'
+                        ? '#0284c7'
+                        : person.officerState === 'SECURING_CELL'
+                        ? '#059669'
+                        : person.officerState === 'MEDICAL_RECOVERY'
+                        ? '#7c3aed'
+                        : '#3b82f6'
+                    }
+                    opacity="0.95"
+                  />
+                  <text
+                    x={person.x}
+                    y={person.y + 38}
+                    fill="#ffffff"
+                    fontSize="6.5"
+                    fontWeight="bold"
+                    textAnchor="middle"
+                    pointerEvents="none"
+                  >
+                    {person.officerState}
+                  </text>
+                </g>
+              )}
+
+              {/* Escaping Inmate Alert Badge */}
+              {person.status === 'ESCAPING' && (
+                <g className="animate-pulse">
+                  <rect
+                    x={person.x - 36}
+                    y={person.y + 29}
+                    width="72"
+                    height="13"
+                    rx="3"
+                    fill="#dc2626"
+                  />
+                  <text
+                    x={person.x}
+                    y={person.y + 38}
+                    fill="#ffffff"
+                    fontSize="7"
+                    fontWeight="extrabold"
+                    textAnchor="middle"
+                    pointerEvents="none"
+                  >
+                    ESCAPING
+                  </text>
+                </g>
+              )}
             </g>
           );
         })}

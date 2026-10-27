@@ -384,8 +384,137 @@ async function runTests() {
     assert(commRes.status === 200, 'System communication status returns HTTP 200');
     assert(commRes.data.gateways.online === commRes.data.gateways.total, 'All ESP32 gateways reported ONLINE');
 
-    // 15. Clean Reset Behavior
-    console.log('\n[SUITE 15: Simulation Reset to Baseline]');
+    // 15. Autonomous Escape & Responding Officer Interception (Section 18 Test 1)
+    console.log('\n[SUITE 15: Controlled Escape & Officer Interception]');
+    const escapeRes = await request('/api/scenarios/controlled-escape', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ workflow: 'WORKFLOW_A' })
+    });
+    assert(escapeRes.status === 200, 'Controlled escape scenario endpoint succeeds');
+    assert(engine.state.people['P-1044'].status === 'ESCAPING', 'Prisoner Marcus Vance transitions to ESCAPING');
+    assert(engine.state.people['OFC-514'].officerState === 'INTERCEPTING', 'Officer Lt. Sterling dispatched to INTERCEPT');
+
+    // Simulate interception
+    engine.state.people['OFC-514'].x = engine.state.people['P-1044'].x;
+    engine.state.people['OFC-514'].y = engine.state.people['P-1044'].y;
+    engine.tick();
+    assert(engine.state.people['OFC-514'].officerState === 'ESCORTING', 'Officer transitions to ESCORTING upon interception');
+    assert(engine.state.people['P-1044'].status === 'DETAINED', 'Prisoner transitions to DETAINED under escort');
+
+    // 16. Cell Return Workflow A: Officer Requests Admin Closure (Section 18 Test 2)
+    console.log('\n[SUITE 16: Cell Securing Workflow A – Admin Assistance & Radio Request]');
+    // Move to cell waypoint to trigger arrival
+    engine.state.people['OFC-514'].currentWaypoint = 'W_A102';
+    engine.state.people['OFC-514'].path = [];
+    engine.triggerReturnToCellSecuring('OFC-514', 'P-1044');
+    assert(engine.state.people['OFC-514'].officerState === 'REQUESTING_ACCESS', 'Officer enters REQUESTING_ACCESS state');
+    assert(Boolean(engine.state.people['OFC-514'].messageBubble?.text), 'Radio message bubble visible above officer');
+
+    const radioReqs = await request('/api/radio-requests');
+    assert(radioReqs.data.requests?.length > 0, 'Central Security receives pending radio request');
+    const targetReq = radioReqs.data.requests[0];
+
+    // Admin responds to close the cell
+    const closeRes = await request(`/api/radio-requests/${targetReq.id}/respond`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ action: 'CLOSE_CELL' })
+    });
+    assert(closeRes.status === 200, 'Admin close-cell command executed');
+    assert(engine.state.doors['DOOR-A102'].position === 'CLOSED', 'Cell door position confirmed CLOSED');
+    assert(engine.state.doors['DOOR-A102'].lockState === 'LOCKED', 'Cell door solenoid confirmed LOCKED');
+    assert(engine.state.people['P-1044'].status === 'NORMAL', 'Prisoner returned to NORMAL status');
+
+    // 17. Cell Return Workflow B: Officer Independent RFID Badge Securing (Section 18 Test 3)
+    console.log('\n[SUITE 17: Cell Securing Workflow B – Officer RFID Badge]');
+    engine.handleDoorLock('DOOR-A102', 'UNLOCK');
+    engine.handleDoorOperate('DOOR-A102', 'OPEN');
+    engine.state.people['P-1044'].status = 'DETAINED';
+    engine.state.people['P-1044'].cellWaypoint = 'W_A102';
+    engine.state.people['P-1044'].assignedDoorId = 'DOOR-A102';
+
+    engine.executeRfidCellSecure('OFC-514', 'P-1044', 'DOOR-A102');
+    assert(engine.state.doors['DOOR-A102'].position === 'CLOSED', 'Door secured via RFID presentation');
+    assert(engine.state.doors['DOOR-A102'].lockState === 'LOCKED', 'Door locked via RFID access control');
+    assert(engine.state.accessLogs[0].result === 'GRANTED', 'RFID access log records GRANTED access for officer return');
+    assert(auditLogger.verifyChain().valid === true, 'Audit log chain cryptographically valid after RFID event');
+
+    // 18. Administrator-to-Officer Task Dispatch (Section 18 Test 4)
+    console.log('\n[SUITE 18: Administrator-to-Officer Task Commands]');
+    const taskRes = await request('/api/officers/OFC-514/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        commandType: 'PATROL_ZONE',
+        targetWaypointId: 'W_NORTH_A',
+        note: 'Inspect north wing corridors'
+      })
+    });
+    assert(taskRes.status === 200, 'Admin-to-officer command accepted with HTTP 200');
+    assert(engine.state.people['OFC-514'].officerState === 'RESPONDING_TO_ADMIN_COMMAND', 'Officer transitions to RESPONDING_TO_ADMIN_COMMAND');
+    assert(Boolean(engine.state.people['OFC-514'].messageBubble?.text.includes('North Main Corridor')), 'Officer simulated radio response dispatched');
+
+    // 19. Officer Incapacitation & Medical Recovery (Section 4.2 & Section 10)
+    console.log('\n[SUITE 19: Officer Incapacitation & Medical Recovery]');
+    const medRes = await request('/api/officers/OFC-702/medical-event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ scenario: 'CONFRONTATION_EXHAUSTION' })
+    });
+    assert(medRes.status === 200, 'Officer medical event accepted with HTTP 200');
+    assert(engine.state.people['OFC-702'].officerState === 'MEDICAL_RECOVERY', 'Officer status set to MEDICAL_RECOVERY');
+    assert(engine.state.people['OFC-702'].path.length === 0, 'Incapacitated officer stops movement');
+
+    // Simulate recovery progression
+    engine.state.people['OFC-702'].recoveryTimerSec = 1;
+    engine.processAutonomousStaffAndPrisoners(new Date().toISOString());
+    assert(engine.state.people['OFC-702'].officerState === 'PATROLLING', 'Officer recovers and returns to duty');
+
+    // 20. CCTV Surveillance, FOV Geometry & Line-of-Sight Occlusion (Section 11 & 12)
+    console.log('\n[SUITE 20: CCTV Surveillance, FOV Geometry & Occlusion]');
+    const cctvRes = await request('/api/cameras');
+    assert(cctvRes.status === 200, 'Cameras API returns HTTP 200');
+    assert(Object.keys(cctvRes.data.cameras).length === 8, 'All 8 facility security cameras initialized');
+
+    // Yard camera CAM-01 visibility test
+    engine.updateCameraVisibility(new Date().toISOString());
+    const cam01 = engine.state.cameras['CAM-01'];
+    assert(cam01.status === 'ONLINE', 'Camera CAM-01 is ONLINE');
+    const yardInmateVisible = cam01.visibleEntities.some(e => e.id === 'P-6120');
+    assert(yardInmateVisible === true, 'CAM-01 sees Robert Paulson in the Common Exercise Yard');
+
+    // Behind camera or out-of-range exclusion
+    const northInmateVisibleInYard = cam01.visibleEntities.some(e => e.id === 'P-3105');
+    assert(northInmateVisibleInYard === false, 'CAM-01 excludes Block C inmate out of field of view / behind camera');
+
+    // Toggle camera to OFFLINE
+    const toggleRes = await request('/api/cameras/CAM-01/toggle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ status: 'OFFLINE' })
+    });
+    assert(toggleRes.status === 200, 'Camera toggle endpoint returns HTTP 200');
+    assert(engine.state.cameras['CAM-01'].status === 'OFFLINE', 'Camera CAM-01 status toggled to OFFLINE');
+    assert(engine.state.cameras['CAM-01'].visibleEntities.length === 0, 'Offline camera reports 0 visible entities');
+
+    // Restore camera
+    await request('/api/cameras/CAM-01/toggle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ status: 'ONLINE' })
+    });
+
+    // 21. Mass Escape Scenario Coordination (Section 18 Test 5)
+    console.log('\n[SUITE 21: Multi-Prisoner Escape Coordination]');
+    const massRes = await request('/api/scenarios/mass-escape', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` }
+    });
+    assert(massRes.status === 200, 'Mass escape scenario returns HTTP 200');
+
+    // 22. Clean Reset Behavior
+    console.log('\n[SUITE 22: Simulation Reset to Baseline]');
     const resetRes = await request('/api/scenarios/reset', { method: 'POST' });
     assert(resetRes.status === 200, 'Reset simulation endpoint succeeds');
     assert(engine.state.gates['GATE-01']?.state === 'CLOSED', 'Gate reset to default baseline');

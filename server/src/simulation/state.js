@@ -1,10 +1,20 @@
 import { ROOMS, WAYPOINTS } from './waypoints.js';
+import { CAMERAS } from './cctv.js';
 
 export const INITIAL_STATE = {
   // System Health & Stats
   systemHealth: 98,
   systemOnline: true,
   lastUpdated: new Date().toISOString(),
+
+  // CCTV Surveillance System (Perception Layer)
+  cameras: JSON.parse(JSON.stringify(CAMERAS)),
+
+  // Pending Officer-to-Central Radio Communication Requests (Workflow A)
+  officerRadioRequests: [],
+
+  // Administrator-to-Officer Task Assignments
+  officerTasks: [],
 
   // Facility Simulation Clock
   simulationClock: {
@@ -492,7 +502,10 @@ export const INITIAL_STATE = {
       alias: 'Apex',
       type: 'PRISONER',
       category: 'PRISONER',
+      profile: 'ESCAPE_PRONE',
       assignedCell: 'Cell A-102',
+      assignedDoorId: 'DOOR-A102',
+      cellWaypoint: 'W_A102',
       securityRisk: 'HIGH_SECURITY',
       currentRoom: 'Cell A-102',
       currentWaypoint: 'W_A102',
@@ -501,7 +514,7 @@ export const INITIAL_STATE = {
       targetWaypoint: null,
       path: [],
       activity: 'Resting in Cell',
-      status: 'NORMAL',
+      status: 'NORMAL', // 'NORMAL' | 'ESCAPING' | 'DETAINED' | 'IN_TRANSIT' | 'RESTRICTED'
       trackingStatus: 'SIMULATED TRACKING',
       beaconFrequencyHz: 433.92,
       batteryLevel: 94,
@@ -525,7 +538,10 @@ export const INITIAL_STATE = {
       alias: 'Specter',
       type: 'PRISONER',
       category: 'PRISONER',
+      profile: 'RESTLESS',
       assignedCell: 'Cell B-102',
+      assignedDoorId: 'DOOR-B102',
+      cellWaypoint: 'W_B102',
       securityRisk: 'MEDIUM',
       currentRoom: 'Cell B-102',
       currentWaypoint: 'W_B102',
@@ -557,7 +573,10 @@ export const INITIAL_STATE = {
       alias: 'Jackrabbit',
       type: 'PRISONER',
       category: 'PRISONER',
+      profile: 'ROUTINE',
       assignedCell: 'Cell C-101',
+      assignedDoorId: 'DOOR-C101',
+      cellWaypoint: 'W_C101',
       securityRisk: 'LOW',
       currentRoom: 'Cell C-101',
       currentWaypoint: 'W_C101',
@@ -587,7 +606,10 @@ export const INITIAL_STATE = {
       alias: 'Valkyrie',
       type: 'PRISONER',
       category: 'PRISONER',
+      profile: 'SPECIAL_CARE',
       assignedCell: 'Medical Ward',
+      assignedDoorId: null,
+      cellWaypoint: 'W_MED_2',
       securityRisk: 'SPECIAL_CARE',
       currentRoom: 'Medical Ward - Patient Bed 1',
       currentWaypoint: 'W_MED_2',
@@ -618,7 +640,10 @@ export const INITIAL_STATE = {
       alias: 'Ghost',
       type: 'PRISONER',
       category: 'PRISONER',
+      profile: 'RESTLESS',
       assignedCell: 'Isolation Cell ISO-01',
+      assignedDoorId: 'DOOR-ISO01',
+      cellWaypoint: 'W_ISO_CELL1',
       securityRisk: 'MAXIMUM_ISOLATION',
       currentRoom: 'Isolation Cell ISO-01',
       currentWaypoint: 'W_ISO_CELL1',
@@ -649,7 +674,10 @@ export const INITIAL_STATE = {
       alias: 'Moose',
       type: 'PRISONER',
       category: 'PRISONER',
+      profile: 'SOCIAL',
       assignedCell: 'Cell B-104',
+      assignedDoorId: 'DOOR-B104',
+      cellWaypoint: 'W_B104',
       securityRisk: 'MEDIUM',
       currentRoom: 'Common Exercise Yard',
       currentWaypoint: 'W_YARD_1',
@@ -690,6 +718,11 @@ export const INITIAL_STATE = {
       targetWaypoint: null,
       path: [],
       activity: 'Perimeter Fence Inspection',
+      officerState: 'PATROLLING', // 'PATROLLING' | 'OBSERVING' | 'RESPONDING' | 'INTERCEPTING' | 'ESCORTING' | 'REQUESTING_ACCESS' | 'SECURING_CELL' | 'MEDICAL_RECOVERY' | 'RESPONDING_TO_ADMIN_COMMAND'
+      currentAssignment: null,
+      messageBubble: null, // { text: '...', expiresAt: 123456, type: 'RADIO' }
+      rfidBadgeAction: null, // { cardId: '...', doorId: '...', text: '...' }
+      recoveryTimerSec: 0,
       patrolState: 'ACTIVE_PATROL',
       status: 'NORMAL',
       shift: 'Day Shift (06:00 - 18:00)',
@@ -716,6 +749,11 @@ export const INITIAL_STATE = {
       targetWaypoint: null,
       path: [],
       activity: 'Routine Cell Block Check',
+      officerState: 'PATROLLING',
+      currentAssignment: null,
+      messageBubble: null,
+      rfidBadgeAction: null,
+      recoveryTimerSec: 0,
       patrolState: 'ACTIVE_PATROL',
       status: 'NORMAL',
       shift: 'Day Shift (06:00 - 18:00)',
@@ -742,6 +780,11 @@ export const INITIAL_STATE = {
       targetWaypoint: null,
       path: [],
       activity: 'Escort Duty & Checkpoint Guard',
+      officerState: 'PATROLLING',
+      currentAssignment: null,
+      messageBubble: null,
+      rfidBadgeAction: null,
+      recoveryTimerSec: 0,
       patrolState: 'ACTIVE_PATROL',
       status: 'NORMAL',
       shift: 'Day Shift (06:00 - 18:00)',

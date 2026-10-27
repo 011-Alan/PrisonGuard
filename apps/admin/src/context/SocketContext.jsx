@@ -68,7 +68,10 @@ export function SocketProvider({ children }) {
           gates: tickData.gates || prev.gates,
           doors: tickData.doors || prev.doors,
           speakers: tickData.speakers || prev.speakers,
-          lockdown: tickData.lockdown || prev.lockdown
+          lockdown: tickData.lockdown || prev.lockdown,
+          cameras: tickData.cameras || prev.cameras,
+          officerRadioRequests: tickData.officerRadioRequests || prev.officerRadioRequests,
+          officerTasks: tickData.officerTasks || prev.officerTasks
         };
       });
     });
@@ -264,6 +267,47 @@ export function SocketProvider({ children }) {
     });
   };
 
+  const toggleCamera = async (cameraId, status) => {
+    return authFetch(`/api/cameras/${cameraId}/toggle`, {
+      method: 'POST',
+      body: JSON.stringify({ status })
+    });
+  };
+
+  const respondToRadioRequest = async (requestId, action = 'CLOSE_CELL') => {
+    return authFetch(`/api/radio-requests/${requestId}/respond`, {
+      method: 'POST',
+      body: JSON.stringify({ action })
+    });
+  };
+
+  const dispatchOfficerTask = async ({ officerId, commandType, targetWaypointId, note, priority }) => {
+    return authFetch(`/api/officers/${officerId}/command`, {
+      method: 'POST',
+      body: JSON.stringify({ commandType, targetWaypointId, note, priority })
+    });
+  };
+
+  const triggerOfficerMedical = async (officerId, scenario = 'CONFRONTATION_EXHAUSTION') => {
+    return authFetch(`/api/officers/${officerId}/medical-event`, {
+      method: 'POST',
+      body: JSON.stringify({ scenario })
+    });
+  };
+
+  const startControlledEscape = async (workflow = 'WORKFLOW_A') => {
+    return authFetch('/api/scenarios/controlled-escape', {
+      method: 'POST',
+      body: JSON.stringify({ workflow })
+    });
+  };
+
+  const startMassEscape = async () => {
+    return authFetch('/api/scenarios/mass-escape', {
+      method: 'POST'
+    });
+  };
+
   return (
     <SocketContext.Provider
       value={{
@@ -292,7 +336,13 @@ export function SocketProvider({ children }) {
         controlClock,
         startScenario,
         stopScenario,
-        resetSimulation
+        resetSimulation,
+        toggleCamera,
+        respondToRadioRequest,
+        dispatchOfficerTask,
+        triggerOfficerMedical,
+        startControlledEscape,
+        startMassEscape
       }}
     >
       {children}

@@ -12,13 +12,15 @@ import {
   FileCheck,
   BarChart3,
   Settings,
-  ExternalLink
+  ExternalLink,
+  Video
 } from 'lucide-react';
 import { SIMULATOR_URL } from '../config';
 
 export default function Sidebar({ activeTab, onSelectTab }) {
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'cctv', label: 'CCTV Monitoring', icon: Video, badge: '8' },
     { id: 'facility', label: 'Facility Map', icon: Map },
     { id: 'access', label: 'Access Control', icon: KeyRound },
     { id: 'tracking', label: 'People & Tracking', icon: Users },

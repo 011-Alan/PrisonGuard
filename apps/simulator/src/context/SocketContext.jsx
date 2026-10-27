@@ -113,7 +113,10 @@ export function SocketProvider({ children }) {
           gates: tickData.gates || prev.gates,
           doors: tickData.doors || prev.doors,
           speakers: tickData.speakers || prev.speakers,
-          lockdown: tickData.lockdown || prev.lockdown
+          lockdown: tickData.lockdown || prev.lockdown,
+          cameras: tickData.cameras || prev.cameras,
+          officerRadioRequests: tickData.officerRadioRequests || prev.officerRadioRequests,
+          officerTasks: tickData.officerTasks || prev.officerTasks
         };
       });
     });
@@ -238,6 +241,71 @@ export function SocketProvider({ children }) {
     }).then(r => r.json());
   };
 
+  const controlClock = async (speed, isPaused) => {
+    return fetch(`${API_BASE_URL}/api/clock/control`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer SIMULATOR_BYPASS'
+      },
+      body: JSON.stringify({ speed, isPaused })
+    }).then(r => r.json());
+  };
+
+  const startControlledEscape = async (workflow = 'WORKFLOW_A') => {
+    return fetch(`${API_BASE_URL}/api/scenarios/controlled-escape`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer SIMULATOR_BYPASS'
+      },
+      body: JSON.stringify({ workflow })
+    }).then(r => r.json());
+  };
+
+  const startMassEscape = async () => {
+    return fetch(`${API_BASE_URL}/api/scenarios/mass-escape`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer SIMULATOR_BYPASS'
+      }
+    }).then(r => r.json());
+  };
+
+  const toggleCamera = async (cameraId, status) => {
+    return fetch(`${API_BASE_URL}/api/cameras/${cameraId}/toggle`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer SIMULATOR_BYPASS'
+      },
+      body: JSON.stringify({ status })
+    }).then(r => r.json());
+  };
+
+  const triggerOfficerMedical = async (officerId, scenario = 'CONFRONTATION_EXHAUSTION') => {
+    return fetch(`${API_BASE_URL}/api/officers/${officerId}/medical-event`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer SIMULATOR_BYPASS'
+      },
+      body: JSON.stringify({ scenario })
+    }).then(r => r.json());
+  };
+
+  const respondToRadioRequest = async (requestId, action = 'CLOSE_CELL') => {
+    return fetch(`${API_BASE_URL}/api/radio-requests/${requestId}/respond`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer SIMULATOR_BYPASS'
+      },
+      body: JSON.stringify({ action })
+    }).then(r => r.json());
+  };
+
   return (
     <SocketContext.Provider
       value={{
@@ -259,7 +327,13 @@ export function SocketProvider({ children }) {
         movePerson,
         startScenario,
         stopScenario,
-        resetSimulation
+        resetSimulation,
+        controlClock,
+        startControlledEscape,
+        startMassEscape,
+        toggleCamera,
+        triggerOfficerMedical,
+        respondToRadioRequest
       }}
     >
       {children}

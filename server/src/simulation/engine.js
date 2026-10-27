@@ -1,5 +1,6 @@
 import { INITIAL_STATE } from './state.js';
 import { WAYPOINTS, findShortestPath } from './waypoints.js';
+import { computeCameraVisibility } from './cctv.js';
 import { SensorFusionEngine } from './rules.js';
 import { ScenarioRunner } from './scenarios.js';
 import { mqttSimulator } from '../communication/mqttSimulator.js';
@@ -148,6 +149,12 @@ export class SimulationEngine {
     // Advance Facility Simulation Clock
     this.stepSimulationClock();
 
+    // Autonomous staff & prisoner state machine checks
+    this.processAutonomousStaffAndPrisoners(now);
+
+    // Update CCTV camera perception & line-of-sight visibility
+    this.updateCameraVisibility(now);
+
     // Autonomous routine checks for officers
     if (this.tickCounter % 12 === 0) {
       this.stepAutonomousPatrols();
@@ -169,8 +176,147 @@ export class SimulationEngine {
       gates: this.state.gates,
       doors: this.state.doors,
       speakers: this.state.speakers,
-      lockdown: this.state.lockdown
+      lockdown: this.state.lockdown,
+      cameras: this.state.cameras,
+      officerRadioRequests: this.state.officerRadioRequests,
+      officerTasks: this.state.officerTasks
     });
+  }
+
+  updateCameraVisibility(now) {
+    if (!this.state.cameras) return;
+    const allEntities = Object.values(this.state.people || {});
+    for (const cam of Object.values(this.state.cameras)) {
+      cam.visibleEntities = computeCameraVisibility(cam, allEntities, this.state.doors);
+      cam.lastUpdated = now;
+    }
+  }
+
+  processAutonomousStaffAndPrisoners(now) {
+    const speed = this.state.simulationClock?.speed || 1;
+
+    // 1. Process officer states & timers
+    for (const [id, person] of Object.entries(this.state.people)) {
+      if (person.type === 'OFFICER') {
+        // Message bubble expiry
+        if (person.messageBubble && person.messageBubble.expiresAt < Date.now()) {
+          person.messageBubble = null;
+        }
+
+        // Medical recovery timer
+        if (person.officerState === 'MEDICAL_RECOVERY') {
+          person.recoveryTimerSec = Math.max(0, (person.recoveryTimerSec || 15) - speed);
+          if (person.recoveryTimerSec <= 0) {
+            person.officerState = 'PATROLLING';
+            person.status = 'NORMAL';
+            person.activity = 'Resumed Duty following Medical Clearance';
+            person.messageBubble = null;
+
+            if (person.associatedIncident) {
+              const inc = this.state.incidents.find(i => i.id === person.associatedIncident);
+              if (inc) {
+                inc.status = 'RESOLVED';
+                inc.resolvedBy = 'Dr. E. Reed (Medical Clearance)';
+                db.setIncidents(this.state.incidents);
+              }
+              person.associatedIncident = null;
+            }
+
+            this.addRecentActivity({
+              event: `${person.name} Cleared by Medical – Returned to Duty`,
+              location: person.currentRoom,
+              status: 'NORMAL',
+              color: 'green'
+            });
+          }
+        }
+
+        // Intercepting officer tracking prisoner
+        if (person.officerState === 'INTERCEPTING' && person.currentAssignment) {
+          const targetId = person.currentAssignment.targetPersonId;
+          const prisoner = this.state.people[targetId];
+
+          if (prisoner && prisoner.status === 'ESCAPING') {
+            const dist = Math.hypot(person.x - prisoner.x, person.y - prisoner.y);
+            // If adjacent or within interception range (<= 55 units)
+            if (dist <= 55 || person.currentWaypoint === prisoner.currentWaypoint) {
+              // Interception!
+              person.officerState = 'ESCORTING';
+              person.activity = `Escorting ${prisoner.name} back to ${prisoner.assignedCell}`;
+              prisoner.status = 'DETAINED';
+              prisoner.activity = `Detained – Under escort to ${prisoner.assignedCell}`;
+
+              // Recalculate escort path to cell
+              const returnWp = prisoner.cellWaypoint || 'W_A102';
+              const returnPath = findShortestPath(person.currentWaypoint, returnWp).slice(1);
+              person.path = [...returnPath];
+              prisoner.path = [...returnPath];
+              person.targetWaypoint = returnWp;
+              prisoner.targetWaypoint = returnWp;
+
+              person.messageBubble = {
+                text: `Inmate ${prisoner.name} detained. Escorting to cell.`,
+                expiresAt: Date.now() + 6000,
+                type: 'RADIO'
+              };
+
+              this.addRecentActivity({
+                event: `${person.name} Intercepted ${prisoner.name}`,
+                location: person.currentRoom,
+                status: 'NORMAL',
+                color: 'green'
+              });
+            } else if ((!person.path || person.path.length === 0) && prisoner.currentWaypoint) {
+              // Re-route toward moving prisoner
+              person.path = findShortestPath(person.currentWaypoint, prisoner.currentWaypoint).slice(1);
+            }
+          }
+        }
+
+        // Escorting officer arriving at assigned cell
+        if (person.officerState === 'ESCORTING' && person.currentAssignment) {
+          const targetId = person.currentAssignment.targetPersonId;
+          const prisoner = this.state.people[targetId];
+          const returnWp = prisoner?.cellWaypoint || 'W_A102';
+
+          if (person.currentWaypoint === returnWp && (!person.path || person.path.length === 0)) {
+            // Reached cell: trigger securing workflow (Workflow A vs B)
+            this.triggerReturnToCellSecuring(person.id, targetId);
+          }
+        }
+
+        // Admin-assigned task progression
+        if (person.officerState === 'RESPONDING_TO_ADMIN_COMMAND' && person.currentAssignment) {
+          const targetWp = person.currentAssignment.targetWaypointId;
+          if (person.currentWaypoint === targetWp && (!person.path || person.path.length === 0)) {
+            // Task completed!
+            const taskId = person.currentAssignment.taskId;
+            const task = this.state.officerTasks.find(t => t.id === taskId);
+            if (task) {
+              task.status = 'COMPLETED';
+              task.completedAt = now;
+            }
+
+            person.officerState = 'OBSERVING';
+            person.activity = `Stationed at ${person.currentRoom}`;
+            person.currentAssignment = null;
+            person.messageBubble = {
+              text: `Arrived at ${person.currentRoom}. Station secured.`,
+              expiresAt: Date.now() + 5000,
+              type: 'RADIO'
+            };
+
+            this.addRecentActivity({
+              event: `Task Complete: ${person.name} stationed at ${person.currentRoom}`,
+              location: person.currentRoom,
+              status: 'NORMAL',
+              color: 'green'
+            });
+            this.broadcastEvent('officer:task_completed', { taskId, officerId: person.id });
+          }
+        }
+      }
+    }
   }
 
   stepSimulationClock() {
@@ -275,6 +421,7 @@ export class SimulationEngine {
     gate.state = targetState === 'OPEN' ? 'OPENING' : 'CLOSING';
     gate.isJammed = false;
     gate.motorCurrentAmps = 2.1;
+    cmd.status = 'EXECUTING';
 
     this.updateCommandStage(cmd.id, 'ESP32_GATEWAY', 'COMPLETED', `Dispatched to node ${gate.controllerId}`);
     this.updateCommandStage(cmd.id, 'ACTUATOR_TRANSITION', 'IN_PROGRESS', `Drive motor engaged (2.1A)`);
@@ -394,6 +541,16 @@ export class SimulationEngine {
       if (door.reedId && this.state.devices[door.reedId]) {
         this.state.devices[door.reedId].value = (action === 'OPEN' ? 'OPEN' : 'CLOSED');
         this.state.devices[door.reedId].lastUpdated = new Date().toISOString();
+      }
+
+      // Check if prisoner escapes upon cell door opening
+      if (action === 'OPEN') {
+        const occupant = Object.values(this.state.people).find(
+          p => p.assignedDoorId === doorId && p.status === 'NORMAL' && p.currentRoom && p.currentRoom.includes('Cell')
+        );
+        if (occupant) {
+          this.triggerPrisonerEscape(occupant.id);
+        }
       }
 
       this.updateCommandStage(cmd.id, 'ACTUATOR_TRANSITION', 'COMPLETED', `Door reached ${door.position}`);
@@ -668,128 +825,556 @@ export class SimulationEngine {
     return report;
   }
 
-  // --- Gate Operations ---
-  handleGateCommand(gateId, targetState, user = { username: 'OPERATOR', role: 'OPERATOR' }) {
-    const gate = this.state.gates[gateId];
-    if (!gate) throw new Error(`Gate ${gateId} not found`);
+  // --- CCTV Surveillance & Camera Status ---
+  toggleCameraStatus(cameraId, status, user = { username: 'ADMIN', role: 'ADMIN' }) {
+    const cam = this.state.cameras[cameraId];
+    if (!cam) throw new Error(`Camera ${cameraId} not found`);
 
-    // Duplicate command protection
-    if ((gate.state === 'OPENING' && targetState === 'OPEN') || (gate.state === 'CLOSING' && targetState === 'CLOSE')) {
-      return {
-        id: gate.lastCommandId,
-        gateId,
-        targetState,
-        status: 'EXECUTING',
-        note: `Command to ${targetState} already executing on ${gateId}`
-      };
+    cam.status = status;
+    cam.lastUpdated = new Date().toISOString();
+    if (status === 'OFFLINE') {
+      cam.visibleEntities = [];
     }
-
-    const ctrl = this.state.controllers[gate.controllerId];
-    if (!ctrl || ctrl.status !== 'ONLINE') {
-      const errCmd = {
-        id: `CMD-${Date.now().toString(36).toUpperCase()}`,
-        gateId,
-        targetState,
-        status: 'DEVICE_OFFLINE',
-        timestamp: new Date().toISOString()
-      };
-      this.commandHistory.unshift(errCmd);
-      throw new Error(`Cannot operate gate ${gateId}: Controller ${gate.controllerId} is OFFLINE`);
-    }
-
-    const commandId = `CMD-${Date.now().toString(36).toUpperCase()}`;
-    const cmd = {
-      id: commandId,
-      gateId,
-      targetState,
-      status: 'EXECUTING',
-      timestamp: new Date().toISOString()
-    };
-    this.commandHistory.unshift(cmd);
-    gate.lastCommandId = commandId;
-    gate.targetState = targetState;
-    gate.state = targetState === 'OPEN' ? 'OPENING' : 'CLOSING';
-    gate.isJammed = false;
-    gate.motorCurrentAmps = 2.1;
-
-    // Publish to simulated MQTT
-    mqttSimulator.publish(`prisonGuard/gate/${gateId}/command`, {
-      commandId,
-      targetState,
-      issuer: user.username
-    }, { direction: 'OUTBOUND', commandId, messageType: 'COMMAND' });
 
     auditLogger.log({
-      type: 'GATE_COMMAND',
+      type: 'CAMERA_STATUS_CHANGE',
       user,
-      action: `Gate ${gate.name} command: ${targetState}`,
-      details: { gateId, commandId, targetState }
+      action: `Camera ${cam.name} status set to ${status}`,
+      details: { cameraId, status }
+    });
+
+    this.addRecentActivity({
+      event: `CCTV ${cam.name}: ${status}`,
+      location: cam.location,
+      status: status === 'ONLINE' ? 'NORMAL' : 'WARNING',
+      color: status === 'ONLINE' ? 'green' : 'amber'
+    });
+
+    this.broadcastEvent('camera:status_change', { cameraId, status });
+    this.broadcastState();
+    return cam;
+  }
+
+  // --- Autonomous Prisoner Escape & Officer Interception State Machine ---
+  triggerPrisonerEscape(prisonerId, targetEscapeWaypoint = null, preferredWorkflow = null) {
+    const prisoner = this.state.people[prisonerId];
+    if (!prisoner) return;
+
+    prisoner.status = 'ESCAPING';
+    prisoner.activity = 'Escaping Cell – Breaching Perimeter Corridor';
+
+    // Route choices by profile / destination
+    let escapeTarget = targetEscapeWaypoint;
+    if (!escapeTarget) {
+      if (prisoner.profile === 'ESCAPE_PRONE') escapeTarget = 'W_PERIM_EAST_N';
+      else if (prisoner.profile === 'RESTLESS') escapeTarget = 'W_SALLY_GATE_OUT';
+      else if (prisoner.profile === 'SOCIAL') escapeTarget = 'W_YARD_1';
+      else escapeTarget = 'W_NORTH_MID_1';
+    }
+
+    const currentWp = prisoner.currentWaypoint || prisoner.cellWaypoint || 'W_A102';
+    const path = findShortestPath(currentWp, escapeTarget);
+    prisoner.path = path.slice(1);
+    prisoner.targetWaypoint = escapeTarget;
+    prisoner.preferredWorkflow = preferredWorkflow; // 'WORKFLOW_A' | 'WORKFLOW_B' | null (randomized)
+
+    // Trigger critical incident
+    const incId = `INC-ESC-${Date.now().toString(36).toUpperCase()}`;
+    const incident = {
+      id: incId,
+      title: `Escape Alert: ${prisoner.name} (${prisoner.id}) exited ${prisoner.assignedCell}`,
+      rule: 'RULE C: Unauthorized Cell Exit & Corridor Movement',
+      severity: 'CRITICAL',
+      location: prisoner.assignedCell,
+      coordinates: { x: prisoner.x, y: prisoner.y },
+      associatedDevice: prisoner.assignedDoorId || 'REED-A102',
+      associatedPerson: prisoner.id,
+      status: 'ACTIVE',
+      acknowledgedBy: null,
+      resolvedBy: null,
+      timestamp: new Date().toISOString(),
+      evidence: [
+        `Assigned barrier ${prisoner.assignedDoorId} detected unlatched position`,
+        `Autonomous beacon movement initiated towards ${escapeTarget}`,
+        `Security sensor perimeter trip anticipated`
+      ]
+    };
+    prisoner.associatedIncident = incId;
+    this.state.incidents.unshift(incident);
+    db.setIncidents(this.state.incidents);
+
+    this.addRecentActivity({
+      event: `BREACH: ${prisoner.name} Escaping Cell`,
+      location: prisoner.assignedCell,
+      status: 'CRITICAL',
+      color: 'red'
+    });
+
+    this.broadcastEvent('incident:created', incident);
+    this.broadcastState();
+
+    // Dispatch nearest available officer
+    this.dispatchRespondingOfficer(prisoner.id, preferredWorkflow);
+  }
+
+  dispatchRespondingOfficer(prisonerId, preferredWorkflow = null) {
+    const prisoner = this.state.people[prisonerId];
+    if (!prisoner) return;
+
+    // Filter available officers
+    const candidates = Object.values(this.state.people).filter(
+      p => p.type === 'OFFICER' &&
+      p.officerState !== 'MEDICAL_RECOVERY' &&
+      p.officerState !== 'INTERCEPTING' &&
+      p.officerState !== 'ESCORTING'
+    );
+
+    let chosenOfficer = null;
+    let shortestDist = Infinity;
+
+    for (const officer of candidates) {
+      const dist = Math.hypot(officer.x - prisoner.x, officer.y - prisoner.y);
+      if (dist < shortestDist) {
+        shortestDist = dist;
+        chosenOfficer = officer;
+      }
+    }
+
+    // Fallback if all busy: pick first officer not in medical recovery
+    if (!chosenOfficer) {
+      chosenOfficer = Object.values(this.state.people).find(
+        p => p.type === 'OFFICER' && p.officerState !== 'MEDICAL_RECOVERY'
+      );
+    }
+
+    if (chosenOfficer) {
+      chosenOfficer.officerState = 'INTERCEPTING';
+      chosenOfficer.currentAssignment = {
+        type: 'INTERCEPT_PRISONER',
+        targetPersonId: prisoner.id,
+        targetCell: prisoner.assignedCell,
+        doorId: prisoner.assignedDoorId,
+        preferredWorkflow
+      };
+      chosenOfficer.activity = `INTERCEPTING: Pursuing ${prisoner.name}`;
+      chosenOfficer.messageBubble = {
+        text: `Command: Intercepting ${prisoner.name}!`,
+        expiresAt: Date.now() + 6000,
+        type: 'RADIO'
+      };
+
+      // Path straight towards prisoner's current or target waypoint
+      const officerWp = chosenOfficer.currentWaypoint || 'W_NORTH_A';
+      const targetWp = prisoner.currentWaypoint || prisoner.targetWaypoint || 'W_A_CORR_2';
+      chosenOfficer.path = findShortestPath(officerWp, targetWp).slice(1);
+      chosenOfficer.targetWaypoint = targetWp;
+
+      this.addRecentActivity({
+        event: `${chosenOfficer.name} Dispatched – Intercepting ${prisoner.name}`,
+        location: chosenOfficer.currentRoom,
+        status: 'WARNING',
+        color: 'amber'
+      });
+
+      this.broadcastState();
+    }
+  }
+
+  // --- Two Methods of Officer Cell Access (Workflow A vs Workflow B) ---
+  triggerReturnToCellSecuring(officerId, prisonerId) {
+    const officer = this.state.people[officerId];
+    const prisoner = this.state.people[prisonerId];
+    if (!officer || !prisoner) return;
+
+    const cellDoorId = prisoner.assignedDoorId || 'DOOR-A102';
+    const cellDoor = this.state.doors[cellDoorId];
+
+    // Determine workflow: if explicitly requested, use that; otherwise 50/50 seed
+    let workflow = prisoner.preferredWorkflow;
+    if (!workflow) {
+      workflow = Math.random() < 0.5 ? 'WORKFLOW_A' : 'WORKFLOW_B';
+    }
+
+    if (workflow === 'WORKFLOW_A') {
+      // Workflow A: Officer requests administrator assistance via radio
+      officer.officerState = 'REQUESTING_ACCESS';
+      officer.activity = `Requesting Central Security to secure ${prisoner.assignedCell}`;
+      const radioText = `Central, ${officer.name} at ${prisoner.assignedCell}. Prisoner returned. Requesting cell closure.`;
+      officer.messageBubble = {
+        text: radioText,
+        expiresAt: Date.now() + 16000,
+        type: 'RADIO'
+      };
+
+      const reqId = `REQ-${Date.now().toString(36).toUpperCase()}`;
+      const radioRequest = {
+        id: reqId,
+        officerId: officer.id,
+        officerName: officer.name,
+        cell: prisoner.assignedCell,
+        doorId: cellDoorId,
+        prisonerId: prisoner.id,
+        prisonerName: prisoner.name,
+        message: radioText,
+        actionRequired: 'CLOSE_CELL',
+        status: 'PENDING',
+        expiresAt: Date.now() + 15000,
+        timestamp: new Date().toISOString()
+      };
+
+      this.state.officerRadioRequests.unshift(radioRequest);
+
+      this.addRecentActivity({
+        event: `Radio Request: ${officer.name} requests closure of ${prisoner.assignedCell}`,
+        location: prisoner.assignedCell,
+        status: 'NORMAL',
+        color: 'blue'
+      });
+
+      this.broadcastEvent('officer:radio_request', radioRequest);
+      this.broadcastState();
+
+      // Configurable timeout fallback: if Central does not respond within 15s, officer uses RFID independently
+      setTimeout(() => {
+        const pending = this.state.officerRadioRequests.find(r => r.id === reqId && r.status === 'PENDING');
+        if (pending) {
+          pending.status = 'TIMED_OUT';
+          this.addRecentActivity({
+            event: `Admin Request Timeout: ${officer.name} securing with RFID badge`,
+            location: prisoner.assignedCell,
+            status: 'NORMAL',
+            color: 'amber'
+          });
+          this.executeRfidCellSecure(officer.id, prisoner.id, cellDoorId);
+        }
+      }, 15000);
+
+    } else {
+      // Workflow B: Officer secures cell independently with RFID credential
+      this.executeRfidCellSecure(officer.id, prisoner.id, cellDoorId);
+    }
+  }
+
+  executeRfidCellSecure(officerId, prisonerId, cellDoorId) {
+    const officer = this.state.people[officerId];
+    const prisoner = this.state.people[prisonerId];
+    const door = this.state.doors[cellDoorId];
+    if (!officer || !prisoner || !door) return;
+
+    officer.officerState = 'SECURING_CELL';
+    officer.activity = `Securing ${door.name} via RFID Badge`;
+    officer.rfidBadgeAction = {
+      cardId: officer.rfidCardId || `CARD-${officer.id}`,
+      doorId: cellDoorId,
+      timestamp: new Date().toISOString(),
+      text: `RFID BADGE VERIFIED: ${officer.rfidCardId || officer.id}`
+    };
+
+    // Close and lock the door barrier
+    door.position = 'CLOSED';
+    door.lockState = 'LOCKED';
+    door.lastUpdated = new Date().toISOString();
+    if (door.reedId && this.state.devices[door.reedId]) {
+      this.state.devices[door.reedId].value = 'CLOSED';
+    }
+    if (door.lockId && this.state.devices[door.lockId]) {
+      this.state.devices[door.lockId].value = 'LOCKED';
+    }
+
+    // Record RFID access log
+    const accessEntry = {
+      id: `ACC-${Date.now().toString(36).toUpperCase()}`,
+      timestamp: new Date().toISOString(),
+      readerId: door.reedId || `RFID-${door.block || 'CELL'}`,
+      cardId: officer.rfidCardId,
+      personName: officer.name,
+      role: 'OFFICER',
+      location: door.location,
+      result: 'GRANTED',
+      reason: 'Authorized Prisoner Return & Cell Custody Lockup'
+    };
+    this.state.accessLogs.unshift(accessEntry);
+    db.setAccessLogs(this.state.accessLogs);
+
+    // Cryptographic audit log
+    auditLogger.log({
+      type: 'OFFICER_RFID_CELL_SECURED',
+      user: { username: officer.name, role: 'OFFICER' },
+      action: `Officer ${officer.name} secured ${door.name} with RFID credential`,
+      details: { officerId, prisonerId, cellDoorId, cardId: officer.rfidCardId }
+    });
+
+    // Reset prisoner to normal resting state
+    prisoner.status = 'NORMAL';
+    prisoner.activity = 'Resting in Cell';
+    prisoner.currentRoom = prisoner.assignedCell;
+    prisoner.currentWaypoint = prisoner.cellWaypoint;
+    prisoner.path = [];
+    prisoner.targetWaypoint = null;
+
+    // Resolve associated escape incident
+    if (prisoner.associatedIncident) {
+      const inc = this.state.incidents.find(i => i.id === prisoner.associatedIncident);
+      if (inc) {
+        inc.status = 'RESOLVED';
+        inc.resolvedBy = `${officer.name} (Officer RFID)`;
+        db.setIncidents(this.state.incidents);
+      }
+      prisoner.associatedIncident = null;
+    }
+
+    this.addRecentActivity({
+      event: `${door.name} Locked – Officer RFID Access Granted`,
+      location: door.location,
+      status: 'NORMAL',
+      color: 'green'
     });
 
     this.broadcastState();
 
-    // Simulate physical travel duration (2500ms)
+    // After 3 seconds, clear RFID animation and return officer to patrol
     setTimeout(() => {
-      if (gate.state === 'JAMMED') return;
+      officer.rfidBadgeAction = null;
+      officer.messageBubble = null;
+      officer.officerState = 'PATROLLING';
+      officer.activity = 'Routine Cell Block Check';
+      officer.currentAssignment = null;
+      this.broadcastState();
+    }, 3000);
+  }
 
-      gate.state = targetState;
-      gate.limitSwitchClosed = (targetState === 'CLOSED');
-      gate.limitSwitchOpen = (targetState === 'OPEN');
-      gate.motorCurrentAmps = 0.05;
-      gate.lastUpdated = new Date().toISOString();
-      cmd.status = 'CONFIRMED';
+  // --- Administrator Responds to Officer Radio Request ---
+  respondToRadioRequest(requestId, action = 'CLOSE_CELL', user = { username: 'ADMIN', role: 'ADMIN' }) {
+    const req = this.state.officerRadioRequests.find(r => r.id === requestId);
+    if (!req) throw new Error(`Radio request ${requestId} not found`);
 
-      mqttSimulator.publish(`prisonGuard/gate/${gateId}/ack`, {
-        commandId,
-        confirmedState: targetState,
-        limitSwitchConfirmed: true
-      }, { direction: 'INBOUND', commandId, messageType: 'ACK' });
+    if (action === 'CLOSE_CELL') {
+      const door = this.state.doors[req.doorId];
+      if (door) {
+        door.position = 'CLOSED';
+        door.lockState = 'LOCKED';
+        door.lastUpdated = new Date().toISOString();
+        if (door.reedId && this.state.devices[door.reedId]) {
+          this.state.devices[door.reedId].value = 'CLOSED';
+        }
+        if (door.lockId && this.state.devices[door.lockId]) {
+          this.state.devices[door.lockId].value = 'LOCKED';
+        }
+      }
+
+      req.status = 'COMPLETED';
+      req.resolvedBy = user.username;
+      req.resolvedAt = new Date().toISOString();
+
+      const officer = this.state.people[req.officerId];
+      if (officer) {
+        officer.messageBubble = {
+          text: 'Central confirmed cell closure. Returning to patrol.',
+          expiresAt: Date.now() + 4000,
+          type: 'RADIO'
+        };
+        officer.officerState = 'PATROLLING';
+        officer.activity = 'Routine Patrol';
+        officer.currentAssignment = null;
+      }
+
+      const prisoner = this.state.people[req.prisonerId];
+      if (prisoner) {
+        prisoner.status = 'NORMAL';
+        prisoner.activity = 'Resting in Cell';
+        prisoner.currentRoom = prisoner.assignedCell;
+        prisoner.currentWaypoint = prisoner.cellWaypoint;
+        prisoner.path = [];
+        prisoner.targetWaypoint = null;
+
+        if (prisoner.associatedIncident) {
+          const inc = this.state.incidents.find(i => i.id === prisoner.associatedIncident);
+          if (inc) {
+            inc.status = 'RESOLVED';
+            inc.resolvedBy = `${user.username} (Admin Close)`;
+            db.setIncidents(this.state.incidents);
+          }
+          prisoner.associatedIncident = null;
+        }
+      }
+
+      auditLogger.log({
+        type: 'ADMIN_CELL_CLOSURE_COMMAND',
+        user,
+        action: `Administrator closed ${req.cell} in response to ${req.officerName}`,
+        details: { requestId, cell: req.cell, doorId: req.doorId }
+      });
 
       this.addRecentActivity({
-        event: `${gate.name} ${targetState === 'OPEN' ? 'Opened' : 'Closed'} – Confirmed`,
-        location: gate.location,
+        event: `Admin Closed ${req.cell} – Officer ${req.officerName} Resumed Duty`,
+        location: req.cell,
         status: 'NORMAL',
         color: 'green'
       });
 
+      this.broadcastEvent('officer:radio_response', req);
       this.broadcastState();
-    }, 2500);
-
-    return cmd;
+      return req;
+    }
   }
 
-  handleGateJam(gateId) {
-    const gate = this.state.gates[gateId];
-    if (!gate) return;
+  // --- Administrator-to-Officer Task Dispatch ---
+  dispatchOfficerTask({ officerId, commandType, targetWaypointId, note = '', priority = 'NORMAL', user = { username: 'ADMIN', role: 'ADMIN' } }) {
+    const officer = this.state.people[officerId];
+    if (!officer) throw new Error(`Officer ${officerId} not found`);
+    if (!WAYPOINTS[targetWaypointId]) throw new Error(`Invalid destination waypoint: ${targetWaypointId}`);
 
-    gate.state = 'JAMMED';
-    gate.isJammed = true;
-    gate.motorCurrentAmps = 4.8;
-    gate.limitSwitchClosed = false;
-    gate.limitSwitchOpen = false;
-    gate.lastUpdated = new Date().toISOString();
-
-    mqttSimulator.publish(`prisonGuard/gate/${gateId}/ack`, {
-      commandId: gate.lastCommandId,
-      confirmedState: 'JAMMED',
-      limitSwitchConfirmed: false,
-      fault: 'OBSTACLE_OR_MOTOR_STALL'
-    }, { direction: 'INBOUND', commandId: gate.lastCommandId, messageType: 'ACK' });
-
-    // Sensor fusion rule evaluation
-    const evalResult = this.rules.evaluateGateJam(gateId);
-    if (evalResult?.createIncident) {
-      this.state.incidents.unshift(evalResult.incident);
-      db.setIncidents(this.state.incidents);
-      this.addRecentActivity({
-        event: `Gate Jammed – ${gate.name}`,
-        location: gate.location,
-        status: 'WARNING',
-        color: 'amber'
-      });
+    if (officer.officerState === 'MEDICAL_RECOVERY') {
+      throw new Error(`Officer ${officer.name} is currently incapacitated / undergoing medical recovery.`);
     }
 
+    if (officer.officerState === 'INTERCEPTING' && priority !== 'EMERGENCY_OVERRIDE') {
+      throw new Error(`Officer ${officer.name} is actively pursuing an escaping inmate. Cannot interrupt higher-priority response.`);
+    }
+
+    const taskId = `TASK-${Date.now().toString(36).toUpperCase()}`;
+    const destinationRoom = WAYPOINTS[targetWaypointId].room;
+
+    const task = {
+      id: taskId,
+      officerId: officer.id,
+      officerName: officer.name,
+      commandType, // 'REPORT_TO' | 'GUARD_CELL' | 'PATROL_ZONE' | 'REPORT_MEDICAL' | 'INSPECT_GATE'
+      destinationRoom,
+      targetWaypointId,
+      priority,
+      note,
+      dispatchedBy: user.username,
+      status: 'IN_PROGRESS',
+      timestamp: new Date().toISOString()
+    };
+
+    this.state.officerTasks.unshift(task);
+
+    officer.officerState = 'RESPONDING_TO_ADMIN_COMMAND';
+    officer.activity = `${commandType}: Heading to ${destinationRoom}`;
+    officer.currentAssignment = { type: 'ADMIN_TASK', taskId, targetWaypointId, destinationRoom };
+
+    // Radio exchange acknowledgement
+    officer.messageBubble = {
+      text: `Received: Proceeding to ${destinationRoom}`,
+      expiresAt: Date.now() + 8000,
+      type: 'DISPATCH'
+    };
+
+    // Calculate valid walking path
+    const currentWp = officer.currentWaypoint || 'W_NORTH_A';
+    officer.path = findShortestPath(currentWp, targetWaypointId).slice(1);
+    officer.targetWaypoint = targetWaypointId;
+
+    auditLogger.log({
+      type: 'ADMIN_OFFICER_DISPATCH',
+      user,
+      action: `Assigned task to ${officer.name}: ${commandType} at ${destinationRoom}`,
+      details: task
+    });
+
+    this.addRecentActivity({
+      event: `Dispatch: ${officer.name} assigned to ${destinationRoom}`,
+      location: destinationRoom,
+      status: 'NORMAL',
+      color: 'blue'
+    });
+
+    this.broadcastEvent('officer:task_created', task);
     this.broadcastState();
+    return task;
+  }
+
+  // --- Officer Incapacitation & Medical Recovery Workflow ---
+  triggerOfficerMedicalEvent(officerId, reason = 'CONFRONTATION_EXHAUSTION', user = { username: 'SIMULATOR', role: 'OPERATOR' }) {
+    const officer = this.state.people[officerId];
+    if (!officer) throw new Error(`Officer ${officerId} not found`);
+
+    officer.officerState = 'MEDICAL_RECOVERY';
+    officer.status = 'RESTRICTED';
+    officer.activity = `Incapacitated / Awaiting Medical Assistance (${reason})`;
+    officer.recoveryTimerSec = 15; // 15 seconds simulation timer
+    officer.path = [];
+    officer.targetWaypoint = null;
+
+    officer.messageBubble = {
+      text: `Medical Assistance Requested – Officer Down (${reason})`,
+      expiresAt: Date.now() + 10000,
+      type: 'MEDICAL'
+    };
+
+    const incId = `INC-MED-${Date.now().toString(36).toUpperCase()}`;
+    const incident = {
+      id: incId,
+      title: `Officer Welfare Alert: ${officer.name} Incapacitated`,
+      rule: 'RULE G: Officer Welfare / Medical Response Required',
+      severity: 'WARNING',
+      location: officer.currentRoom,
+      coordinates: { x: officer.x, y: officer.y },
+      associatedDevice: 'DURESS-MED-01',
+      associatedPerson: officer.id,
+      status: 'ACTIVE',
+      acknowledgedBy: null,
+      resolvedBy: null,
+      timestamp: new Date().toISOString(),
+      evidence: [
+        `Officer telemetry beacon signaled sudden cessation of movement`,
+        `Vital distress flags confirmed via body-worn monitor`,
+        `Assigned sector: ${officer.assignedZone}`
+      ]
+    };
+    officer.associatedIncident = incId;
+    this.state.incidents.unshift(incident);
+    db.setIncidents(this.state.incidents);
+
+    auditLogger.log({
+      type: 'OFFICER_INCAPACITATED',
+      user,
+      action: `Officer ${officer.name} entered medical recovery (${reason})`,
+      details: { officerId, reason, incidentId: incId }
+    });
+
+    this.addRecentActivity({
+      event: `Medical Alert: ${officer.name} Incapacitated`,
+      location: officer.currentRoom,
+      status: 'WARNING',
+      color: 'red'
+    });
+
+    this.broadcastEvent('officer:medical_event', { officerId, incident });
+    this.broadcastState();
+    return { officer, incident };
+  }
+
+  // --- Controlled Demonstration Scenarios ---
+  startControlledEscapeScenario(preferredWorkflow = 'WORKFLOW_A') {
+    // Unlock first then open Marcus Vance's Cell A-102 door
+    this.handleDoorLock('DOOR-A102', 'UNLOCK');
+    this.handleDoorOperate('DOOR-A102', 'OPEN');
+    const vance = this.state.people['P-1044'];
+    if (vance) {
+      vance.preferredWorkflow = preferredWorkflow;
+      this.triggerPrisonerEscape('P-1044', 'W_PERIM_EAST_N', preferredWorkflow);
+    }
+  }
+
+  startMassEscapeScenario() {
+    // Unlock and open 3 separate doors across different cell blocks
+    this.handleDoorLock('DOOR-A102', 'UNLOCK');
+    this.handleDoorLock('DOOR-B102', 'UNLOCK');
+    this.handleDoorLock('DOOR-C101', 'UNLOCK');
+
+    this.handleDoorOperate('DOOR-A102', 'OPEN');
+    this.handleDoorOperate('DOOR-B102', 'OPEN');
+    this.handleDoorOperate('DOOR-C101', 'OPEN');
+
+    // 3 prisoners choose distinct routes
+    setTimeout(() => {
+      this.triggerPrisonerEscape('P-1044', 'W_PERIM_EAST_N'); // Vance to East Perimeter
+      this.triggerPrisonerEscape('P-2089', 'W_SALLY_GATE_OUT'); // Chen to Sally Port
+      this.triggerPrisonerEscape('P-3105', 'W_YARD_1'); // Miller to Yard
+    }, 500);
   }
 
   // --- Door Lock / Solenoid Operations ---

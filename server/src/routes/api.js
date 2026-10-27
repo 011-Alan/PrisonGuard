@@ -375,6 +375,98 @@ export function createApiRouter(engine) {
     res.json({ success: true, message: 'Simulation reset to baseline' });
   });
 
+  // --- CCTV Surveillance Endpoints ---
+  router.get('/cameras', (req, res) => {
+    res.json({ cameras: engine.state.cameras });
+  });
+
+  router.post('/cameras/:id/toggle', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      const { id } = req.params;
+      const { status } = req.body || {};
+      if (!['ONLINE', 'OFFLINE', 'DEGRADED'].includes(status)) {
+        return res.status(400).json({ error: 'Allowed status: ONLINE, OFFLINE, DEGRADED' });
+      }
+      const cam = engine.toggleCameraStatus(id, status, req.user);
+      res.json({ success: true, camera: cam });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // --- Officer Dispatch Commands (Admin to Officer) ---
+  router.post('/officers/:id/command', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      const { id } = req.params;
+      const { commandType, targetWaypointId, note, priority } = req.body || {};
+
+      if (!commandType || !targetWaypointId) {
+        return res.status(400).json({ error: 'commandType and targetWaypointId are required' });
+      }
+
+      const task = engine.dispatchOfficerTask({
+        officerId: id,
+        commandType,
+        targetWaypointId,
+        note,
+        priority: priority || 'NORMAL',
+        user: req.user
+      });
+
+      res.json({ success: true, task });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // --- Officer Medical Event Trigger ---
+  router.post('/officers/:id/medical-event', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      const { id } = req.params;
+      const { scenario } = req.body || {};
+      const result = engine.triggerOfficerMedicalEvent(id, scenario, req.user);
+      res.json({ success: true, ...result });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // --- Officer Radio Communication Requests & Admin Response ---
+  router.get('/radio-requests', (req, res) => {
+    res.json({ requests: engine.state.officerRadioRequests });
+  });
+
+  router.post('/radio-requests/:id/respond', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      const { id } = req.params;
+      const { action } = req.body || {};
+      const result = engine.respondToRadioRequest(id, action || 'CLOSE_CELL', req.user);
+      res.json({ success: true, request: result });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // --- Controlled Escape & Demonstration Scenarios ---
+  router.post('/scenarios/controlled-escape', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      const { workflow } = req.body || {};
+      engine.startControlledEscapeScenario(workflow || 'WORKFLOW_A');
+      res.json({ success: true, message: `Controlled escape started with ${workflow || 'WORKFLOW_A'}` });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  router.post('/scenarios/mass-escape', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      engine.startMassEscapeScenario();
+      res.json({ success: true, message: 'Mass escape scenario initiated across multiple sectors' });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
   // Audit Logs & Cryptographic Tamper Verification
   router.get('/logs/audit', (req, res) => {
     const limit = Math.min(parseInt(req.query.limit || '100', 10), 500);
