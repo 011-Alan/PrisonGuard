@@ -1,0 +1,18 @@
+{
+  "name": "prisonguard-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node start-all.js",
+    "start": "node start-all.js",
+    "dev:server": "node start-all.js server",
+    "dev:admin": "node start-all.js admin",
+    "dev:simulator": "node start-all.js simulator",
+    "build": "node -e \"const {spawnSync}=require('child_process'); const isWin=process.platform==='win32'; const cmd=isWin?'npm.cmd':'npm'; spawnSync(cmd, ['run', 'build'], {cwd:'apps/admin', stdio:'inherit'}); spawnSync(cmd, ['run', 'build'], {cwd:'apps/simulator', stdio:'inherit'});\"",
+    "build:admin": "node -e \"const {spawnSync}=require('child_process'); const isWin=process.platform==='win32'; const cmd=isWin?'npm.cmd':'npm'; spawnSync(cmd, ['run', 'build'], {cwd:'apps/admin', stdio:'inherit'});\"",
+    "build:simulator": "node -e \"const {spawnSync}=require('child_process'); const isWin=process.platform==='win32'; const cmd=isWin?'npm.cmd':'npm'; spawnSync(cmd, ['run', 'build'], {cwd:'apps/simulator', stdio:'inherit'});\"",
+    "test": "node server/test/run-all.js",
+    "install:all": "node -e \"const {spawnSync}=require('child_process'); const isWin=process.platform==='win32'; const cmd=isWin?'npm.cmd':'npm'; spawnSync(cmd, ['install'], {cwd:'server', stdio:'inherit'}); spawnSync(cmd, ['install'], {cwd:'apps/admin', stdio:'inherit'}); spawnSync(cmd, ['install'], {cwd:'apps/simulator', stdio:'inherit'});\""
+  }
+}

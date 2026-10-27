@@ -1,0 +1,18 @@
+{
+  "name": "prisonguard-server",
+  "version": "1.0.0",
+  "description": "PrisonGuard Authoritative IoT & Simulation Engine Server",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "socket.io": "^4.7.5"
+  }
+}

@@ -1,0 +1,25 @@
+services:
+  # PrisonGuard Authoritative Backend Service
+  - type: web
+    name: prisonguard-server
+    runtime: node
+    plan: starter
+    rootDir: server
+    buildCommand: npm install
+    startCommand: node src/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: ADMIN_ORIGIN
+        sync: false
+      - key: SIMULATOR_ORIGIN
+        sync: false
+      - key: DATA_STORE_PATH
+        value: ./data/prisonguard_store.json

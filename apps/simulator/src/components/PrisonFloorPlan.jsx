@@ -1,0 +1,631 @@
+import React, { useRef, useState, useEffect } from 'react';
+import { ROOMS, WAYPOINTS } from '../data/waypoints';
+import { useSocket } from '../context/SocketContext';
+import {
+  Shield,
+  KeyRound,
+  Radio,
+  Cpu,
+  Eye,
+  Activity,
+  AlertTriangle,
+  Lock,
+  Unlock,
+  Zap
+} from 'lucide-react';
+
+export default function PrisonFloorPlan({
+  zoom,
+  pan,
+  onPanChange,
+  showIoTOverlay,
+  selectedPerson,
+  onSelectPerson,
+  selectedDevice,
+  onSelectDevice,
+  isFollowing,
+  showRoute
+}) {
+  const { state, commandGate } = useSocket();
+  const svgRef = useRef(null);
+  const isDraggingRef = useRef(false);
+  const dragStartRef = useRef({ x: 0, y: 0 });
+
+  const people = state?.people ? Object.values(state.people) : [];
+  const devices = state?.devices ? Object.values(state.devices) : [];
+  const gates = state?.gates ? Object.values(state.gates) : [];
+  const controllers = state?.controllers ? Object.values(state.controllers) : [];
+
+  // Pan interaction
+  const handleMouseDown = (e) => {
+    if (e.button !== 0) return; // left click only
+    isDraggingRef.current = true;
+    dragStartRef.current = { x: e.clientX - pan.x, y: e.clientY - pan.y };
+  };
+
+  const handleMouseMove = (e) => {
+    if (!isDraggingRef.current) return;
+    onPanChange({
+      x: e.clientX - dragStartRef.current.x,
+      y: e.clientY - dragStartRef.current.y
+    });
+  };
+
+  const handleMouseUp = () => {
+    isDraggingRef.current = false;
+  };
+
+  // Follow Person Camera tracking
+  useEffect(() => {
+    if (isFollowing && selectedPerson && state?.people?.[selectedPerson.id]) {
+      const p = state.people[selectedPerson.id];
+      const centerX = window.innerWidth / 2;
+      const centerY = window.innerHeight / 2;
+      onPanChange({
+        x: centerX - p.x * zoom,
+        y: centerY - p.y * zoom
+      });
+    }
+  }, [isFollowing, selectedPerson, state?.people, zoom, onPanChange]);
+
+  // Click gate to toggle state
+  const handleGateClick = (e, gate) => {
+    e.stopPropagation();
+    const nextState = gate.state === 'OPEN' ? 'CLOSE' : 'OPEN';
+    commandGate(gate.id, nextState);
+  };
+
+  return (
+    <div
+      className="w-full h-full cursor-grab active:cursor-grabbing overflow-hidden bg-[#080d1a] relative bg-tactical-grid select-none"
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+    >
+      <svg
+        ref={svgRef}
+        viewBox="0 0 1600 1000"
+        className="w-[1600px] h-[1000px] transition-transform duration-75 origin-top-left"
+        style={{
+          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`
+        }}
+      >
+        <defs>
+          {/* Wall gradients */}
+          <linearGradient id="wallTexture" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#1e293b" />
+            <stop offset="100%" stopColor="#0f172a" />
+          </linearGradient>
+
+          {/* Alert Glow */}
+          <radialGradient id="alarmGlow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#ef4444" stopOpacity="0.8" />
+            <stop offset="100%" stopColor="#ef4444" stopOpacity="0" />
+          </radialGradient>
+        </defs>
+
+        {/* ---------------- 1. OUTER PERIMETER SECURITY ---------------- */}
+        {/* Outer Fence Line */}
+        <rect
+          x="60"
+          y="20"
+          width="1480"
+          height="960"
+          rx="12"
+          fill="#0a101d"
+          stroke="#334155"
+          strokeWidth="3"
+          strokeDasharray="8,6"
+        />
+
+        {/* Inner Solid Reinforced Concrete Wall */}
+        <polygon
+          points="130,50 1470,50 1440,950 160,950"
+          fill="#0c1424"
+          stroke="#475569"
+          strokeWidth="6"
+        />
+
+        {/* Corner Watchtowers */}
+        <g>
+          {/* NW Tower */}
+          <rect x="110" y="35" width="40" height="40" rx="4" fill="#1e293b" stroke="#06b6d4" strokeWidth="2" />
+          <text x="130" y="60" fill="#06b6d4" fontSize="10" fontWeight="bold" textAnchor="middle">NW</text>
+
+          {/* NE Tower */}
+          <rect x="1450" y="35" width="40" height="40" rx="4" fill="#1e293b" stroke="#06b6d4" strokeWidth="2" />
+          <text x="1470" y="60" fill="#06b6d4" fontSize="10" fontWeight="bold" textAnchor="middle">NE</text>
+
+          {/* SE Tower */}
+          <rect x="1420" y="930" width="40" height="40" rx="4" fill="#1e293b" stroke="#06b6d4" strokeWidth="2" />
+          <text x="1440" y="955" fill="#06b6d4" fontSize="10" fontWeight="bold" textAnchor="middle">SE</text>
+
+          {/* SW Tower */}
+          <rect x="140" y="930" width="40" height="40" rx="4" fill="#1e293b" stroke="#06b6d4" strokeWidth="2" />
+          <text x="160" y="955" fill="#06b6d4" fontSize="10" fontWeight="bold" textAnchor="middle">SW</text>
+        </g>
+
+        {/* ---------------- 2. ROOMS & SECTORS ---------------- */}
+
+        {/* BLOCK A (Cells A-101 to A-104 + Corridor) */}
+        <g id="BlockA">
+          <rect x="250" y="100" width="240" height="170" rx="6" fill="#111827" stroke="#334155" strokeWidth="2" />
+          <rect x="250" y="190" width="240" height="80" fill="#152033" stroke="#1e293b" strokeWidth="1" />
+          <text x="370" y="240" fill="#64748b" fontSize="13" fontWeight="bold" textAnchor="middle" letterSpacing="2">BLOCK A CORRIDOR</text>
+
+          {/* Cell A-101 */}
+          <rect x="260" y="110" width="50" height="65" rx="3" fill="#0f172a" stroke="#475569" strokeWidth="1.5" />
+          <text x="285" y="130" fill="#94a3b8" fontSize="9" fontWeight="bold" textAnchor="middle">A-101</text>
+          <rect x="264" y="145" width="20" height="25" fill="#1e293b" rx="2" /> {/* Bunk */}
+
+          {/* Cell A-102 (Marcus Vance) */}
+          <rect x="315" y="110" width="50" height="65" rx="3" fill="#0f172a" stroke="#f59e0b" strokeWidth="1.5" />
+          <text x="340" y="130" fill="#f59e0b" fontSize="9" fontWeight="bold" textAnchor="middle">A-102</text>
+          <rect x="319" y="145" width="20" height="25" fill="#1e293b" rx="2" />
+
+          {/* Cell A-103 */}
+          <rect x="370" y="110" width="50" height="65" rx="3" fill="#0f172a" stroke="#475569" strokeWidth="1.5" />
+          <text x="395" y="130" fill="#94a3b8" fontSize="9" fontWeight="bold" textAnchor="middle">A-103</text>
+          <rect x="374" y="145" width="20" height="25" fill="#1e293b" rx="2" />
+
+          {/* Cell A-104 */}
+          <rect x="425" y="110" width="50" height="65" rx="3" fill="#0f172a" stroke="#475569" strokeWidth="1.5" />
+          <text x="450" y="130" fill="#94a3b8" fontSize="9" fontWeight="bold" textAnchor="middle">A-104</text>
+          <rect x="429" y="145" width="20" height="25" fill="#1e293b" rx="2" />
+        </g>
+
+        {/* BLOCK B (Cells B-101 to B-104 + Corridor) */}
+        <g id="BlockB">
+          <rect x="680" y="100" width="240" height="170" rx="6" fill="#111827" stroke="#334155" strokeWidth="2" />
+          <rect x="680" y="190" width="240" height="80" fill="#152033" stroke="#1e293b" strokeWidth="1" />
+          <text x="800" y="240" fill="#64748b" fontSize="13" fontWeight="bold" textAnchor="middle" letterSpacing="2">BLOCK B CORRIDOR</text>
+
+          {/* Cell B-101 */}
+          <rect x="690" y="110" width="50" height="65" rx="3" fill="#0f172a" stroke="#475569" strokeWidth="1.5" />
+          <text x="715" y="130" fill="#94a3b8" fontSize="9" fontWeight="bold" textAnchor="middle">B-101</text>
+          <rect x="694" y="145" width="20" height="25" fill="#1e293b" rx="2" />
+
+          {/* Cell B-102 (David Chen) */}
+          <rect x="745" y="110" width="50" height="65" rx="3" fill="#0f172a" stroke="#475569" strokeWidth="1.5" />
+          <text x="770" y="130" fill="#94a3b8" fontSize="9" fontWeight="bold" textAnchor="middle">B-102</text>
+          <rect x="749" y="145" width="20" height="25" fill="#1e293b" rx="2" />
+
+          {/* Cell B-103 */}
+          <rect x="800" y="110" width="50" height="65" rx="3" fill="#0f172a" stroke="#475569" strokeWidth="1.5" />
+          <text x="825" y="130" fill="#94a3b8" fontSize="9" fontWeight="bold" textAnchor="middle">B-103</text>
+          <rect x="804" y="145" width="20" height="25" fill="#1e293b" rx="2" />
+
+          {/* Cell B-104 */}
+          <rect x="855" y="110" width="50" height="65" rx="3" fill="#0f172a" stroke="#475569" strokeWidth="1.5" />
+          <text x="880" y="130" fill="#94a3b8" fontSize="9" fontWeight="bold" textAnchor="middle">B-104</text>
+          <rect x="859" y="145" width="20" height="25" fill="#1e293b" rx="2" />
+        </g>
+
+        {/* BLOCK C (Cells C-101 to C-104 + Corridor) */}
+        <g id="BlockC">
+          <rect x="1110" y="100" width="240" height="170" rx="6" fill="#111827" stroke="#334155" strokeWidth="2" />
+          <rect x="1110" y="190" width="240" height="80" fill="#152033" stroke="#1e293b" strokeWidth="1" />
+          <text x="1230" y="240" fill="#64748b" fontSize="13" fontWeight="bold" textAnchor="middle" letterSpacing="2">BLOCK C CORRIDOR</text>
+
+          {/* Cell C-101 */}
+          <rect x="1120" y="110" width="50" height="65" rx="3" fill="#0f172a" stroke="#475569" strokeWidth="1.5" />
+          <text x="1145" y="130" fill="#94a3b8" fontSize="9" fontWeight="bold" textAnchor="middle">C-101</text>
+          <rect x="1124" y="145" width="20" height="25" fill="#1e293b" rx="2" />
+
+          {/* Cell C-102 */}
+          <rect x="1175" y="110" width="50" height="65" rx="3" fill="#0f172a" stroke="#475569" strokeWidth="1.5" />
+          <text x="1200" y="130" fill="#94a3b8" fontSize="9" fontWeight="bold" textAnchor="middle">C-102</text>
+          <rect x="1179" y="145" width="20" height="25" fill="#1e293b" rx="2" />
+
+          {/* Cell C-103 */}
+          <rect x="1230" y="110" width="50" height="65" rx="3" fill="#0f172a" stroke="#475569" strokeWidth="1.5" />
+          <text x="1255" y="130" fill="#94a3b8" fontSize="9" fontWeight="bold" textAnchor="middle">C-103</text>
+          <rect x="1234" y="145" width="20" height="25" fill="#1e293b" rx="2" />
+
+          {/* Cell C-104 */}
+          <rect x="1285" y="110" width="50" height="65" rx="3" fill="#0f172a" stroke="#475569" strokeWidth="1.5" />
+          <text x="1310" y="130" fill="#94a3b8" fontSize="9" fontWeight="bold" textAnchor="middle">C-104</text>
+          <rect x="1289" y="145" width="20" height="25" fill="#1e293b" rx="2" />
+        </g>
+
+        {/* NORTH MAIN CORRIDOR */}
+        <rect x="250" y="280" width="1100" height="50" fill="#152033" stroke="#1e293b" strokeWidth="1" />
+        <text x="800" y="310" fill="#475569" fontSize="12" fontWeight="bold" textAnchor="middle" letterSpacing="4">NORTH SECURE TRANSIT CONCOURSE</text>
+
+        {/* CENTRAL RESTRICTED SPINE */}
+        <rect x="760" y="330" width="80" height="360" fill="#131c2e" stroke="#ef4444" strokeWidth="1" strokeDasharray="6,4" />
+        <text x="800" y="520" fill="#ef4444" fontSize="10" fontWeight="bold" textAnchor="middle" transform="rotate(-90 800 520)" letterSpacing="2">RESTRICTED CENTRAL SPINE</text>
+
+        {/* MEDICAL & WELFARE WARD */}
+        <g id="MedicalWard">
+          <rect x="250" y="370" width="350" height="230" rx="8" fill="#111c2e" stroke="#10b981" strokeWidth="1.5" />
+          <text x="425" y="405" fill="#10b981" fontSize="14" fontWeight="bold" textAnchor="middle" letterSpacing="2">MEDICAL & WELFARE WARD</text>
+
+          {/* Triage Desk & Station */}
+          <rect x="360" y="430" width="40" height="40" fill="#1e293b" stroke="#334155" rx="3" />
+          <text x="380" y="455" fill="#94a3b8" fontSize="9" textAnchor="middle">Triage</text>
+
+          {/* Patient Beds */}
+          <rect x="460" y="430" width="40" height="45" fill="#1e293b" stroke="#10b981" rx="3" />
+          <text x="480" y="455" fill="#10b981" fontSize="9" textAnchor="middle">Bed 1</text>
+
+          <rect x="460" y="510" width="40" height="45" fill="#1e293b" stroke="#475569" rx="3" />
+          <text x="480" y="535" fill="#94a3b8" fontSize="9" textAnchor="middle">Bed 2</text>
+
+          <rect x="360" y="510" width="40" height="45" fill="#1e293b" stroke="#475569" rx="3" />
+          <text x="380" y="535" fill="#94a3b8" fontSize="9" textAnchor="middle">Bed 3</text>
+        </g>
+
+        {/* COMMON RECREATION YARD */}
+        <g id="CommonYard">
+          <rect x="660" y="370" width="280" height="280" rx="8" fill="#0d1724" stroke="#475569" strokeWidth="2" strokeDasharray="4,4" />
+          <text x="800" y="405" fill="#94a3b8" fontSize="14" fontWeight="bold" textAnchor="middle" letterSpacing="2">COMMON EXERCISE YARD</text>
+
+          {/* Basketball half-court court markings */}
+          <rect x="740" y="490" width="120" height="110" fill="none" stroke="#334155" strokeWidth="1.5" />
+          <circle cx="800" cy="490" r="30" fill="none" stroke="#334155" strokeWidth="1.5" />
+          <circle cx="800" cy="600" r="2" fill="#f59e0b" /> {/* Hoop */}
+
+          {/* Outdoor workout benches */}
+          <rect x="680" y="450" width="30" height="15" fill="#1e293b" rx="2" />
+          <rect x="680" y="480" width="30" height="15" fill="#1e293b" rx="2" />
+        </g>
+
+        {/* ADMINISTRATION BUILDING */}
+        <g id="AdminBuilding">
+          <rect x="1000" y="370" width="350" height="230" rx="8" fill="#111827" stroke="#3b82f6" strokeWidth="1.5" />
+          <text x="1175" y="405" fill="#3b82f6" fontSize="14" fontWeight="bold" textAnchor="middle" letterSpacing="2">ADMINISTRATION & COMMAND</text>
+
+          {/* Warden Office */}
+          <rect x="1210" y="430" width="120" height="70" fill="#152033" stroke="#334155" rx="4" />
+          <text x="1270" y="470" fill="#cbd5e1" fontSize="11" fontWeight="bold" textAnchor="middle">Warden Office</text>
+
+          {/* Staff Lobby */}
+          <rect x="1030" y="430" width="160" height="70" fill="#152033" stroke="#334155" rx="4" />
+          <text x="1110" y="470" fill="#94a3b8" fontSize="11" fontWeight="bold" textAnchor="middle">Staff Briefing Room</text>
+        </g>
+
+        {/* ISOLATION & SOLITARY UNIT */}
+        <g id="Isolation">
+          <rect x="250" y="640" width="350" height="190" rx="8" fill="#15131e" stroke="#dc2626" strokeWidth="1.5" />
+          <text x="425" y="675" fill="#ef4444" fontSize="14" fontWeight="bold" textAnchor="middle" letterSpacing="2">SOLITARY & MAXIMUM ISOLATION</text>
+
+          {/* Cell ISO-01 (Tyler Durden) */}
+          <rect x="280" y="700" width="70" height="80" rx="4" fill="#0b0f19" stroke="#ef4444" strokeWidth="2" />
+          <text x="315" y="735" fill="#ef4444" fontSize="11" fontWeight="bold" textAnchor="middle">ISO-01</text>
+          <rect x="285" y="750" width="25" height="25" fill="#1e293b" />
+
+          {/* Cell ISO-02 */}
+          <rect x="370" y="700" width="70" height="80" rx="4" fill="#0b0f19" stroke="#475569" strokeWidth="1.5" />
+          <text x="405" y="735" fill="#94a3b8" fontSize="11" fontWeight="bold" textAnchor="middle">ISO-02</text>
+          <rect x="375" y="750" width="25" height="25" fill="#1e293b" />
+        </g>
+
+        {/* MAIN SALLY PORT & VEHICLE INTAKE */}
+        <g id="SallyPort">
+          <rect x="660" y="690" width="280" height="180" rx="8" fill="#151e2e" stroke="#0284c7" strokeWidth="2" />
+          <text x="800" y="725" fill="#38bdf8" fontSize="14" fontWeight="bold" textAnchor="middle" letterSpacing="2">MAIN SALLY PORT INTAKE</text>
+
+          {/* Vehicle Inspection Bay */}
+          <rect x="720" y="750" width="160" height="80" fill="#0f172a" stroke="#0284c7" strokeWidth="1.5" strokeDasharray="6,4" />
+          <text x="800" y="795" fill="#38bdf8" fontSize="11" fontWeight="bold" textAnchor="middle">Vehicle Bay (Interlock)</text>
+        </g>
+
+        {/* CENTRAL SECURITY CONTROL ROOM (SOC) */}
+        <g id="ControlRoom">
+          <rect x="1000" y="640" width="350" height="190" rx="8" fill="#111c2e" stroke="#06b6d4" strokeWidth="2" />
+          <text x="1175" y="675" fill="#06b6d4" fontSize="14" fontWeight="bold" textAnchor="middle" letterSpacing="2">CENTRAL SECURITY CONTROL (SOC)</text>
+
+          {/* SOC Operator Consoles */}
+          <rect x="1040" y="710" width="130" height="80" rx="4" fill="#162033" stroke="#06b6d4" strokeWidth="1.5" />
+          <text x="1105" y="745" fill="#06b6d4" fontSize="11" fontWeight="bold" textAnchor="middle">Command Terminals</text>
+
+          {/* Secure Server Rack Bay */}
+          <rect x="1200" y="710" width="120" height="80" rx="4" fill="#0b0f19" stroke="#334155" strokeWidth="1.5" />
+          <text x="1260" y="745" fill="#94a3b8" fontSize="11" fontWeight="bold" textAnchor="middle">IoT Server Racks</text>
+        </g>
+
+        {/* ---------------- 3. GATES & PHYSICAL BARRIERS ---------------- */}
+        {gates.map((gate) => {
+          const isOpen = gate.state === 'OPEN';
+          const isOpening = gate.state === 'OPENING' || gate.state === 'CLOSING';
+          const isJammed = gate.state === 'JAMMED';
+
+          return (
+            <g
+              key={gate.id}
+              onClick={(e) => handleGateClick(e, gate)}
+              className="cursor-pointer group"
+            >
+              {/* Gate barrier bar */}
+              <rect
+                x={gate.x - 22}
+                y={gate.y - 8}
+                width={44}
+                height={16}
+                rx="3"
+                fill={isJammed ? '#7f1d1d' : isOpen ? '#14532d' : '#1e293b'}
+                stroke={isJammed ? '#ef4444' : isOpen ? '#10b981' : '#f59e0b'}
+                strokeWidth="2"
+                className="transition-all"
+              />
+              {/* Gate sliding indicator */}
+              <text
+                x={gate.x}
+                y={gate.y + 4}
+                fill={isJammed ? '#ef4444' : isOpen ? '#10b981' : '#f59e0b'}
+                fontSize="9"
+                fontWeight="extrabold"
+                textAnchor="middle"
+              >
+                {isJammed ? 'JAM' : isOpen ? 'OPEN' : 'GATE'}
+              </text>
+              {/* Hover tooltip label */}
+              <text
+                x={gate.x}
+                y={gate.y - 12}
+                fill="#ffffff"
+                fontSize="9"
+                fontWeight="bold"
+                textAnchor="middle"
+                className="opacity-0 group-hover:opacity-100 transition"
+              >
+                {gate.name} (Click to toggle)
+              </text>
+            </g>
+          );
+        })}
+
+        {/* ---------------- 4. IOT HARDWARE OVERLAY (Sensors, Beams, ESP32) ---------------- */}
+        {showIoTOverlay && (
+          <g id="IoTOverlay">
+            {/* Infrared Laser Beams across perimeter */}
+            {/* North Beam */}
+            <line
+              x1="200"
+              y1="50"
+              x2="1400"
+              y2="50"
+              stroke={state?.devices?.['IR-BEAM-N']?.value === 'BROKEN' ? '#ef4444' : '#10b981'}
+              strokeWidth={state?.devices?.['IR-BEAM-N']?.value === 'BROKEN' ? '3' : '1.5'}
+              strokeDasharray={state?.devices?.['IR-BEAM-N']?.value === 'BROKEN' ? '6,4' : 'none'}
+              opacity="0.75"
+            />
+            {/* East Beam */}
+            <line
+              x1="1485"
+              y1="80"
+              x2="1485"
+              y2="900"
+              stroke={state?.devices?.['IR-BEAM-E']?.value === 'BROKEN' ? '#ef4444' : '#10b981'}
+              strokeWidth={state?.devices?.['IR-BEAM-E']?.value === 'BROKEN' ? '4' : '1.5'}
+              strokeDasharray={state?.devices?.['IR-BEAM-E']?.value === 'BROKEN' ? '6,4' : 'none'}
+              opacity="0.8"
+            />
+            {/* West Beam */}
+            <line
+              x1="115"
+              y1="80"
+              x2="115"
+              y2="900"
+              stroke="#10b981"
+              strokeWidth="1.5"
+              opacity="0.75"
+            />
+            {/* South Beam */}
+            <line
+              x1="200"
+              y1="940"
+              x2="1400"
+              y2="940"
+              stroke="#10b981"
+              strokeWidth="1.5"
+              opacity="0.75"
+            />
+
+            {/* ESP32 Controller Nodes */}
+            {controllers.map((ctrl) => {
+              const isOnline = ctrl.status === 'ONLINE';
+              // Approximate position for visual representation
+              let cx = 240, cy = 90;
+              if (ctrl.id.includes('CELL-02')) { cx = 670; cy = 90; }
+              if (ctrl.id.includes('CELL-03')) { cx = 1100; cy = 90; }
+              if (ctrl.id.includes('PERIM-01')) { cx = 1430; cy = 90; }
+              if (ctrl.id.includes('PERIM-02')) { cx = 170; cy = 910; }
+              if (ctrl.id.includes('ACCESS')) { cx = 650; cy = 700; }
+              if (ctrl.id.includes('MED')) { cx = 240; cy = 360; }
+              if (ctrl.id.includes('CAM')) { cx = 1320; cy = 640; }
+
+              return (
+                <g key={ctrl.id} className="cursor-pointer" onClick={() => onSelectDevice && onSelectDevice({ id: ctrl.id, name: ctrl.name, type: 'ESP32_CONTROLLER', location: ctrl.location, controllerId: ctrl.id, gpio: 0, status: ctrl.status, value: isOnline ? 'HEARTBEAT_ACTIVE' : 'OFFLINE' })}>
+                  <rect x={cx - 14} y={cy - 14} width="28" height="28" rx="4" fill={isOnline ? '#0f172a' : '#7f1d1d'} stroke={isOnline ? '#06b6d4' : '#ef4444'} strokeWidth="2" />
+                  <circle cx={cx} cy={cy} r="4" fill={isOnline ? '#10b981' : '#ef4444'} className={isOnline ? 'animate-pulse' : ''} />
+                  <text x={cx} y={cy + 22} fill="#06b6d4" fontSize="8" fontWeight="bold" textAnchor="middle">{ctrl.id}</text>
+                </g>
+              );
+            })}
+
+            {/* Individual Sensors */}
+            {devices.map((dev) => {
+              if (!dev.x || !dev.y) return null;
+              const isSelected = selectedDevice?.id === dev.id;
+              const isOnline = dev.status === 'ONLINE';
+
+              // Sensor color mapping
+              let fillColor = '#10b981';
+              if (!isOnline) fillColor = '#64748b';
+              else if (dev.value === 'OPEN' || dev.value === 'DETECTED' || dev.value === 'BROKEN' || dev.value === 'TRIPPED' || dev.value === 'PRESSED') {
+                fillColor = '#ef4444';
+              }
+
+              return (
+                <g
+                  key={dev.id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectDevice && onSelectDevice(dev);
+                  }}
+                  className="cursor-pointer group"
+                >
+                  {/* Selection Ring */}
+                  {isSelected && (
+                    <circle cx={dev.x} cy={dev.y} r="14" fill="none" stroke="#06b6d4" strokeWidth="2.5" className="animate-pulse" />
+                  )}
+
+                  {/* Marker Icon / Circle */}
+                  <circle cx={dev.x} cy={dev.y} r="6" fill={fillColor} stroke="#ffffff" strokeWidth="1.5" />
+
+                  {/* Device label on hover */}
+                  <text
+                    x={dev.x}
+                    y={dev.y - 10}
+                    fill="#ffffff"
+                    fontSize="9"
+                    fontWeight="bold"
+                    textAnchor="middle"
+                    className="opacity-0 group-hover:opacity-100 transition pointer-events-none drop-shadow"
+                  >
+                    {dev.name} ({dev.value})
+                  </text>
+                </g>
+              );
+            })}
+          </g>
+        )}
+
+        {/* ---------------- 5. ROUTE BREADCRUMBS (If enabled) ---------------- */}
+        {showRoute && selectedPerson?.routeHistory && selectedPerson.routeHistory.length > 1 && (
+          <g id="RouteHistory">
+            {selectedPerson.routeHistory.map((step, idx) => {
+              if (idx === selectedPerson.routeHistory.length - 1) return null;
+              const nextStep = selectedPerson.routeHistory[idx + 1];
+              return (
+                <line
+                  key={idx}
+                  x1={step.x}
+                  y1={step.y}
+                  x2={nextStep.x}
+                  y2={nextStep.y}
+                  stroke="#a855f7"
+                  strokeWidth="3"
+                  strokeDasharray="4,4"
+                  opacity="0.8"
+                />
+              );
+            })}
+          </g>
+        )}
+
+        {/* ---------------- 6. CLICKABLE PERSONNEL BEACONS ---------------- */}
+        {people.map((person) => {
+          const isOfficer = person.type === 'OFFICER';
+          const isSelected = selectedPerson?.id === person.id;
+          const isMoving = person.status === 'IN_TRANSIT';
+
+          return (
+            <g
+              key={person.id}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectPerson(person);
+              }}
+              className="cursor-pointer group"
+            >
+              {/* Outer pulsing beacon ring */}
+              <circle
+                cx={person.x}
+                cy={person.y}
+                r={isSelected ? "20" : "14"}
+                fill={isOfficer ? "rgba(59, 130, 246, 0.25)" : "rgba(245, 158, 11, 0.25)"}
+                stroke={isOfficer ? "#3b82f6" : "#f59e0b"}
+                strokeWidth={isSelected ? "2.5" : "1"}
+                className={isMoving ? "animate-ping opacity-60" : "animate-pulse"}
+              />
+
+              {/* Central Marker Circle */}
+              <circle
+                cx={person.x}
+                cy={person.y}
+                r="9"
+                fill={isOfficer ? "#2563eb" : "#d97706"}
+                stroke="#ffffff"
+                strokeWidth="2"
+              />
+
+              {/* Mini Icon / Initial */}
+              <text
+                x={person.x}
+                y={person.y + 3}
+                fill="#ffffff"
+                fontSize="8"
+                fontWeight="extrabold"
+                textAnchor="middle"
+                pointerEvents="none"
+              >
+                {isOfficer ? 'G' : 'P'}
+              </text>
+
+              {/* Floating Name Badge */}
+              <rect
+                x={person.x - 32}
+                y={person.y + 12}
+                width="64"
+                height="15"
+                rx="3"
+                fill="#0f172a"
+                stroke={isOfficer ? "#3b82f6" : "#f59e0b"}
+                strokeWidth="1"
+                opacity="0.9"
+              />
+              <text
+                x={person.x}
+                y={person.y + 23}
+                fill="#ffffff"
+                fontSize="8"
+                fontWeight="bold"
+                textAnchor="middle"
+                pointerEvents="none"
+              >
+                {person.id}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+
+      {/* Floating Map Legend (Bottom-Left) */}
+      <div className="absolute bottom-5 left-5 bg-[#0f172a]/90 backdrop-blur border border-slate-700/80 rounded-xl p-3 text-xs text-gray-300 space-y-1.5 shadow-xl select-none">
+        <span className="font-bold text-white text-[10px] uppercase tracking-wider block border-b border-slate-800 pb-1">
+          Tactical Map Legend
+        </span>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
+            <span>Officer Beacon</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+            <span>Inmate Beacon</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+            <span>Sensor Normal</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>
+            <span>Sensor Alert / Open</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 bg-cyan-900 border border-cyan-400"></span>
+            <span>ESP32 Node</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-4 h-0.5 bg-emerald-400"></span>
+            <span>IR Optical Beam</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

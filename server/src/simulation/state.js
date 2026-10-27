@@ -1,0 +1,629 @@
+import { ROOMS, WAYPOINTS } from './waypoints.js';
+
+export const INITIAL_STATE = {
+  // System Health & Stats
+  systemHealth: 98,
+  systemOnline: true,
+  lastUpdated: new Date().toISOString(),
+
+  // Controllers (ESP32 Nodes)
+  controllers: {
+    'ESP32-CELL-01': {
+      id: 'ESP32-CELL-01',
+      name: 'Cell Block A Controller',
+      location: 'Block A Electrical Closet',
+      ip: '192.168.10.11',
+      status: 'ONLINE', // 'ONLINE' | 'OFFLINE'
+      lastHeartbeat: new Date().toISOString(),
+      firmware: 'v2.4.1-esp32-freertos',
+      uptimeSec: 86420,
+      ownedDevices: ['REED-A101', 'REED-A102', 'REED-A103', 'REED-A104', 'LOCK-A101', 'LOCK-A102', 'LOCK-A103', 'LOCK-A104', 'PIR-CORR-A']
+    },
+    'ESP32-CELL-02': {
+      id: 'ESP32-CELL-02',
+      name: 'Cell Block B Controller',
+      location: 'Block B Electrical Closet',
+      ip: '192.168.10.12',
+      status: 'ONLINE',
+      lastHeartbeat: new Date().toISOString(),
+      firmware: 'v2.4.1-esp32-freertos',
+      uptimeSec: 86310,
+      ownedDevices: ['REED-B101', 'REED-B102', 'REED-B103', 'REED-B104', 'LOCK-B101', 'LOCK-B102', 'LOCK-B103', 'LOCK-B104', 'PIR-CORR-B']
+    },
+    'ESP32-CELL-03': {
+      id: 'ESP32-CELL-03',
+      name: 'Cell Block C Controller',
+      location: 'Block C Electrical Closet',
+      ip: '192.168.10.13',
+      status: 'ONLINE',
+      lastHeartbeat: new Date().toISOString(),
+      firmware: 'v2.4.1-esp32-freertos',
+      uptimeSec: 86190,
+      ownedDevices: ['REED-C101', 'REED-C102', 'REED-C103', 'REED-C104', 'LOCK-C101', 'LOCK-C102', 'LOCK-C103', 'LOCK-C104', 'PIR-CORR-C']
+    },
+    'ESP32-PERIM-01': {
+      id: 'ESP32-PERIM-01',
+      name: 'North & East Perimeter Node',
+      location: 'North-East Guard Post',
+      ip: '192.168.10.21',
+      status: 'ONLINE',
+      lastHeartbeat: new Date().toISOString(),
+      firmware: 'v2.4.1-esp32-freertos',
+      uptimeSec: 104200,
+      ownedDevices: ['IR-BEAM-N', 'IR-BEAM-E', 'VIB-FENCE-N', 'VIB-FENCE-E', 'GATE-01', 'GATE-03']
+    },
+    'ESP32-PERIM-02': {
+      id: 'ESP32-PERIM-02',
+      name: 'South & West Perimeter Node',
+      location: 'South-West Guard Post',
+      ip: '192.168.10.22',
+      status: 'ONLINE',
+      lastHeartbeat: new Date().toISOString(),
+      firmware: 'v2.4.1-esp32-freertos',
+      uptimeSec: 104150,
+      ownedDevices: ['IR-BEAM-S', 'IR-BEAM-W', 'VIB-FENCE-S', 'VIB-FENCE-W', 'GATE-02', 'GATE-04']
+    },
+    'ESP32-ACCESS-01': {
+      id: 'ESP32-ACCESS-01',
+      name: 'Access Control & Sally Port Node',
+      location: 'Sally Port Guard Station',
+      ip: '192.168.10.31',
+      status: 'ONLINE',
+      lastHeartbeat: new Date().toISOString(),
+      firmware: 'v2.4.1-esp32-freertos',
+      uptimeSec: 142000,
+      ownedDevices: ['GATE-05', 'GATE-06', 'GATE-07', 'GATE-08', 'RFID-SALLY-OUT', 'RFID-SALLY-IN', 'RFID-BLOCK-A', 'RFID-BLOCK-B', 'RFID-BLOCK-C', 'RFID-ADMIN', 'PIR-SPINE']
+    },
+    'ESP32-MED-01': {
+      id: 'ESP32-MED-01',
+      name: 'Medical & Welfare IoT Node',
+      location: 'Medical Ward Tech Room',
+      ip: '192.168.10.41',
+      status: 'ONLINE',
+      lastHeartbeat: new Date().toISOString(),
+      firmware: 'v2.4.1-esp32-freertos',
+      uptimeSec: 72000,
+      ownedDevices: ['DURESS-MED-01', 'PIR-MED', 'REED-ISO01', 'REED-ISO02', 'LOCK-ISO01', 'LOCK-ISO02']
+    },
+    'ESP32-CAM-HUB': {
+      id: 'ESP32-CAM-HUB',
+      name: 'CCTV Telemetry & Alarm Hub',
+      location: 'Central Control Server Bay',
+      ip: '192.168.10.51',
+      status: 'ONLINE',
+      lastHeartbeat: new Date().toISOString(),
+      firmware: 'v2.4.1-esp32-freertos',
+      uptimeSec: 210000,
+      ownedDevices: ['CAM-01', 'CAM-02', 'CAM-03', 'CAM-04', 'CAM-05', 'CAM-06', 'CAM-07', 'CAM-08', 'ALARM-FACILITY']
+    }
+  },
+
+  // Devices & Sensors
+  devices: {
+    // Reed Switches (Door Magnetic Contact)
+    'REED-A101': { id: 'REED-A101', name: 'Cell A-101 Door Contact', type: 'REED_SWITCH', location: 'Cell A-101', controllerId: 'ESP32-CELL-01', gpio: 14, status: 'ONLINE', value: 'CLOSED', x: 285, y: 170, lastUpdated: new Date().toISOString() },
+    'REED-A102': { id: 'REED-A102', name: 'Cell A-102 Door Contact', type: 'REED_SWITCH', location: 'Cell A-102', controllerId: 'ESP32-CELL-01', gpio: 15, status: 'ONLINE', value: 'CLOSED', x: 340, y: 170, lastUpdated: new Date().toISOString() },
+    'REED-A103': { id: 'REED-A103', name: 'Cell A-103 Door Contact', type: 'REED_SWITCH', location: 'Cell A-103', controllerId: 'ESP32-CELL-01', gpio: 16, status: 'ONLINE', value: 'CLOSED', x: 395, y: 170, lastUpdated: new Date().toISOString() },
+    'REED-A104': { id: 'REED-A104', name: 'Cell A-104 Door Contact', type: 'REED_SWITCH', location: 'Cell A-104', controllerId: 'ESP32-CELL-01', gpio: 17, status: 'ONLINE', value: 'CLOSED', x: 450, y: 170, lastUpdated: new Date().toISOString() },
+
+    'REED-B101': { id: 'REED-B101', name: 'Cell B-101 Door Contact', type: 'REED_SWITCH', location: 'Cell B-101', controllerId: 'ESP32-CELL-02', gpio: 14, status: 'ONLINE', value: 'CLOSED', x: 715, y: 170, lastUpdated: new Date().toISOString() },
+    'REED-B102': { id: 'REED-B102', name: 'Cell B-102 Door Contact', type: 'REED_SWITCH', location: 'Cell B-102', controllerId: 'ESP32-CELL-02', gpio: 15, status: 'ONLINE', value: 'CLOSED', x: 770, y: 170, lastUpdated: new Date().toISOString() },
+    'REED-B103': { id: 'REED-B103', name: 'Cell B-103 Door Contact', type: 'REED_SWITCH', location: 'Cell B-103', controllerId: 'ESP32-CELL-02', gpio: 16, status: 'ONLINE', value: 'CLOSED', x: 825, y: 170, lastUpdated: new Date().toISOString() },
+    'REED-B104': { id: 'REED-B104', name: 'Cell B-104 Door Contact', type: 'REED_SWITCH', location: 'Cell B-104', controllerId: 'ESP32-CELL-02', gpio: 17, status: 'ONLINE', value: 'CLOSED', x: 880, y: 170, lastUpdated: new Date().toISOString() },
+
+    'REED-C101': { id: 'REED-C101', name: 'Cell C-101 Door Contact', type: 'REED_SWITCH', location: 'Cell C-101', controllerId: 'ESP32-CELL-03', gpio: 14, status: 'ONLINE', value: 'CLOSED', x: 1145, y: 170, lastUpdated: new Date().toISOString() },
+    'REED-C102': { id: 'REED-C102', name: 'Cell C-102 Door Contact', type: 'REED_SWITCH', location: 'Cell C-102', controllerId: 'ESP32-CELL-03', gpio: 15, status: 'ONLINE', value: 'CLOSED', x: 1200, y: 170, lastUpdated: new Date().toISOString() },
+    'REED-C103': { id: 'REED-C103', name: 'Cell C-103 Door Contact', type: 'REED_SWITCH', location: 'Cell C-103', controllerId: 'ESP32-CELL-03', gpio: 16, status: 'ONLINE', value: 'CLOSED', x: 1255, y: 170, lastUpdated: new Date().toISOString() },
+    'REED-C104': { id: 'REED-C104', name: 'Cell C-104 Door Contact', type: 'REED_SWITCH', location: 'Cell C-104', controllerId: 'ESP32-CELL-03', gpio: 17, status: 'ONLINE', value: 'CLOSED', x: 1310, y: 170, lastUpdated: new Date().toISOString() },
+
+    'REED-ISO01': { id: 'REED-ISO01', name: 'Isolation Cell ISO-01 Door', type: 'REED_SWITCH', location: 'Isolation ISO-01', controllerId: 'ESP32-MED-01', gpio: 18, status: 'ONLINE', value: 'CLOSED', x: 310, y: 725, lastUpdated: new Date().toISOString() },
+    'REED-ISO02': { id: 'REED-ISO02', name: 'Isolation Cell ISO-02 Door', type: 'REED_SWITCH', location: 'Isolation ISO-02', controllerId: 'ESP32-MED-01', gpio: 19, status: 'ONLINE', value: 'CLOSED', x: 390, y: 725, lastUpdated: new Date().toISOString() },
+
+    // Cell Locks
+    'LOCK-A101': { id: 'LOCK-A101', name: 'Cell A-101 Solenoid Lock', type: 'DOOR_LOCK', location: 'Cell A-101', controllerId: 'ESP32-CELL-01', gpio: 21, status: 'ONLINE', value: 'LOCKED', lastUpdated: new Date().toISOString() },
+    'LOCK-A102': { id: 'LOCK-A102', name: 'Cell A-102 Solenoid Lock', type: 'DOOR_LOCK', location: 'Cell A-102', controllerId: 'ESP32-CELL-01', gpio: 22, status: 'ONLINE', value: 'LOCKED', lastUpdated: new Date().toISOString() },
+    'LOCK-A103': { id: 'LOCK-A103', name: 'Cell A-103 Solenoid Lock', type: 'DOOR_LOCK', location: 'Cell A-103', controllerId: 'ESP32-CELL-01', gpio: 23, status: 'ONLINE', value: 'LOCKED', lastUpdated: new Date().toISOString() },
+    'LOCK-A104': { id: 'LOCK-A104', name: 'Cell A-104 Solenoid Lock', type: 'DOOR_LOCK', location: 'Cell A-104', controllerId: 'ESP32-CELL-01', gpio: 25, status: 'ONLINE', value: 'LOCKED', lastUpdated: new Date().toISOString() },
+
+    // PIR Motion Sensors
+    'PIR-CORR-A': { id: 'PIR-CORR-A', name: 'Block A Corridor Motion Sensor', type: 'PIR_MOTION', location: 'Block A Corridor', controllerId: 'ESP32-CELL-01', gpio: 26, status: 'ONLINE', value: 'CLEAR', x: 370, y: 225, lastUpdated: new Date().toISOString() },
+    'PIR-CORR-B': { id: 'PIR-CORR-B', name: 'Block B Corridor Motion Sensor', type: 'PIR_MOTION', location: 'Block B Corridor', controllerId: 'ESP32-CELL-02', gpio: 26, status: 'ONLINE', value: 'CLEAR', x: 800, y: 225, lastUpdated: new Date().toISOString() },
+    'PIR-CORR-C': { id: 'PIR-CORR-C', name: 'Block C Corridor Motion Sensor', type: 'PIR_MOTION', location: 'Block C Corridor', controllerId: 'ESP32-CELL-03', gpio: 26, status: 'ONLINE', value: 'CLEAR', x: 1230, y: 225, lastUpdated: new Date().toISOString() },
+    'PIR-SPINE': { id: 'PIR-SPINE', name: 'Central Spine Restricted Motion Sensor', type: 'PIR_MOTION', location: 'Central Secure Spine', controllerId: 'ESP32-ACCESS-01', gpio: 26, status: 'ONLINE', value: 'CLEAR', x: 800, y: 550, lastUpdated: new Date().toISOString() },
+    'PIR-MED': { id: 'PIR-MED', name: 'Medical Ward Motion Sensor', type: 'PIR_MOTION', location: 'Medical Ward', controllerId: 'ESP32-MED-01', gpio: 27, status: 'ONLINE', value: 'CLEAR', x: 430, y: 480, lastUpdated: new Date().toISOString() },
+
+    // Vibration Sensors
+    'VIB-FENCE-N': { id: 'VIB-FENCE-N', name: 'North Fence Line Vibration Sensor', type: 'VIBRATION', location: 'North Perimeter', controllerId: 'ESP32-PERIM-01', gpio: 32, status: 'ONLINE', value: 'NORMAL', x: 500, y: 50, lastUpdated: new Date().toISOString() },
+    'VIB-FENCE-E': { id: 'VIB-FENCE-E', name: 'East Fence Line Vibration Sensor', type: 'VIBRATION', location: 'East Perimeter', controllerId: 'ESP32-PERIM-01', gpio: 33, status: 'ONLINE', value: 'NORMAL', x: 1510, y: 500, lastUpdated: new Date().toISOString() },
+    'VIB-FENCE-S': { id: 'VIB-FENCE-S', name: 'South Fence Line Vibration Sensor', type: 'VIBRATION', location: 'South Perimeter', controllerId: 'ESP32-PERIM-02', gpio: 32, status: 'ONLINE', value: 'NORMAL', x: 1100, y: 930, lastUpdated: new Date().toISOString() },
+    'VIB-FENCE-W': { id: 'VIB-FENCE-W', name: 'West Fence Line Vibration Sensor', type: 'VIBRATION', location: 'West Perimeter', controllerId: 'ESP32-PERIM-02', gpio: 33, status: 'ONLINE', value: 'NORMAL', x: 90, y: 500, lastUpdated: new Date().toISOString() },
+
+    // IR Break-Beam Sensors
+    'IR-BEAM-N': { id: 'IR-BEAM-N', name: 'North Perimeter IR Barrier', type: 'IR_BREAK_BEAM', location: 'North Perimeter', controllerId: 'ESP32-PERIM-01', gpio: 34, status: 'ONLINE', value: 'INTACT', x: 800, y: 45, lastUpdated: new Date().toISOString() },
+    'IR-BEAM-E': { id: 'IR-BEAM-E', name: 'East Perimeter IR Barrier', type: 'IR_BREAK_BEAM', location: 'East Perimeter', controllerId: 'ESP32-PERIM-01', gpio: 35, status: 'ONLINE', value: 'INTACT', x: 1495, y: 480, lastUpdated: new Date().toISOString() },
+    'IR-BEAM-S': { id: 'IR-BEAM-S', name: 'South Perimeter IR Barrier', type: 'IR_BREAK_BEAM', location: 'South Perimeter', controllerId: 'ESP32-PERIM-02', gpio: 34, status: 'ONLINE', value: 'INTACT', x: 800, y: 920, lastUpdated: new Date().toISOString() },
+    'IR-BEAM-W': { id: 'IR-BEAM-W', name: 'West Perimeter IR Barrier', type: 'IR_BREAK_BEAM', location: 'West Perimeter', controllerId: 'ESP32-PERIM-02', gpio: 35, status: 'ONLINE', value: 'INTACT', x: 105, y: 480, lastUpdated: new Date().toISOString() },
+
+    // RFID Readers
+    'RFID-SALLY-OUT': { id: 'RFID-SALLY-OUT', name: 'Sally Port Exterior RFID Terminal', type: 'RFID_READER', location: 'South Sally Port Outer', controllerId: 'ESP32-ACCESS-01', gpio: 18, status: 'ONLINE', value: 'READY', x: 830, y: 840, lastUpdated: new Date().toISOString() },
+    'RFID-SALLY-IN': { id: 'RFID-SALLY-IN', name: 'Sally Port Interior RFID Terminal', type: 'RFID_READER', location: 'Sally Port Inner Gate', controllerId: 'ESP32-ACCESS-01', gpio: 19, status: 'ONLINE', value: 'READY', x: 830, y: 710, lastUpdated: new Date().toISOString() },
+    'RFID-BLOCK-A': { id: 'RFID-BLOCK-A', name: 'Block A Access RFID Reader', type: 'RFID_READER', location: 'Block A Entrance', controllerId: 'ESP32-ACCESS-01', gpio: 21, status: 'ONLINE', value: 'READY', x: 370, y: 280, lastUpdated: new Date().toISOString() },
+    'RFID-BLOCK-B': { id: 'RFID-BLOCK-B', name: 'Block B Access RFID Reader', type: 'RFID_READER', location: 'Block B Entrance', controllerId: 'ESP32-ACCESS-01', gpio: 22, status: 'ONLINE', value: 'READY', x: 800, y: 280, lastUpdated: new Date().toISOString() },
+    'RFID-ADMIN': { id: 'RFID-ADMIN', name: 'Admin Building Secure RFID Reader', type: 'RFID_READER', location: 'Admin Entrance', controllerId: 'ESP32-ACCESS-01', gpio: 23, status: 'ONLINE', value: 'READY', x: 1080, y: 350, lastUpdated: new Date().toISOString() },
+
+    // Duress & Alarms
+    'DURESS-MED-01': { id: 'DURESS-MED-01', name: 'Medical Station Panic/Duress Button', type: 'DURESS_BUTTON', location: 'Medical Ward', controllerId: 'ESP32-MED-01', gpio: 36, status: 'ONLINE', value: 'IDLE', x: 470, y: 410, lastUpdated: new Date().toISOString() },
+    'ALARM-FACILITY': { id: 'ALARM-FACILITY', name: 'Facility Emergency Strobe & Siren', type: 'ALARM_STROBE', location: 'Facility Wide', controllerId: 'ESP32-CAM-HUB', gpio: 4, status: 'ONLINE', value: 'STANDBY', x: 800, y: 500, lastUpdated: new Date().toISOString() },
+
+    // CCTV Cameras
+    'CAM-01': { id: 'CAM-01', name: 'CAM-01: Common Yard Wide Angle', type: 'CAMERA', location: 'Common Exercise Yard', controllerId: 'ESP32-CAM-HUB', gpio: 0, status: 'ONLINE', value: 'STREAMING', x: 680, y: 390, angle: 45, lastUpdated: new Date().toISOString() },
+    'CAM-02': { id: 'CAM-02', name: 'CAM-02: North Corridor Spine', type: 'CAMERA', location: 'North Main Corridor', controllerId: 'ESP32-CAM-HUB', gpio: 0, status: 'ONLINE', value: 'STREAMING', x: 800, y: 290, angle: 90, lastUpdated: new Date().toISOString() },
+    'CAM-03': { id: 'CAM-03', name: 'CAM-03: Sally Port Vehicle Intake', type: 'CAMERA', location: 'Main Sally Port', controllerId: 'ESP32-CAM-HUB', gpio: 0, status: 'ONLINE', value: 'STREAMING', x: 780, y: 780, angle: 180, lastUpdated: new Date().toISOString() },
+    'CAM-04': { id: 'CAM-04', name: 'CAM-04: East Perimeter Line', type: 'CAMERA', location: 'East Perimeter', controllerId: 'ESP32-CAM-HUB', gpio: 0, status: 'ONLINE', value: 'STREAMING', x: 1475, y: 450, angle: 270, lastUpdated: new Date().toISOString() },
+    'CAM-05': { id: 'CAM-05', name: 'CAM-05: West Perimeter Line', type: 'CAMERA', location: 'West Perimeter', controllerId: 'ESP32-CAM-HUB', gpio: 0, status: 'ONLINE', value: 'STREAMING', x: 100, y: 450, angle: 90, lastUpdated: new Date().toISOString() },
+    'CAM-06': { id: 'CAM-06', name: 'CAM-06: Admin Entry Portal', type: 'CAMERA', location: 'Administration Building', controllerId: 'ESP32-CAM-HUB', gpio: 0, status: 'ONLINE', value: 'STREAMING', x: 1020, y: 380, angle: 135, lastUpdated: new Date().toISOString() },
+    'CAM-07': { id: 'CAM-07', name: 'CAM-07: Medical Ward Triage', type: 'CAMERA', location: 'Medical Ward', controllerId: 'ESP32-CAM-HUB', gpio: 0, status: 'ONLINE', value: 'STREAMING', x: 280, y: 390, angle: 45, lastUpdated: new Date().toISOString() },
+    'CAM-08': { id: 'CAM-08', name: 'CAM-08: SOC Central Command', type: 'CAMERA', location: 'Central Security Control', controllerId: 'ESP32-CAM-HUB', gpio: 0, status: 'ONLINE', value: 'STREAMING', x: 1020, y: 650, angle: 45, lastUpdated: new Date().toISOString() }
+  },
+
+  // Gates (High-Security Perimeter and Internal Gates)
+  gates: {
+    'GATE-01': {
+      id: 'GATE-01',
+      name: 'Gate 1 - North (Perimeter)',
+      type: 'PERIMETER_SLIDING_GATE',
+      location: 'North Perimeter Barrier',
+      controllerId: 'ESP32-PERIM-01',
+      state: 'CLOSED', // 'CLOSED' | 'OPENING' | 'OPEN' | 'CLOSING' | 'JAMMED'
+      targetState: 'CLOSED',
+      limitSwitchClosed: true,
+      limitSwitchOpen: false,
+      isJammed: false,
+      motorCurrentAmps: 0.1,
+      x: 800,
+      y: 60,
+      lastCommandId: null,
+      lastUpdated: new Date().toISOString()
+    },
+    'GATE-02': {
+      id: 'GATE-02',
+      name: 'Gate 2 - South (Sally Port Outer)',
+      type: 'VEHICLE_INTAKE_GATE',
+      location: 'South Sally Port Outer',
+      controllerId: 'ESP32-PERIM-02',
+      state: 'OPEN',
+      targetState: 'OPEN',
+      limitSwitchClosed: false,
+      limitSwitchOpen: true,
+      isJammed: false,
+      motorCurrentAmps: 0.1,
+      x: 800,
+      y: 840,
+      lastCommandId: null,
+      lastUpdated: new Date().toISOString()
+    },
+    'GATE-03': {
+      id: 'GATE-03',
+      name: 'East Gate (Perimeter)',
+      type: 'SECURITY_TURNSTILE_GATE',
+      location: 'East Fence Perimeter',
+      controllerId: 'ESP32-PERIM-01',
+      state: 'CLOSED',
+      targetState: 'CLOSED',
+      limitSwitchClosed: true,
+      limitSwitchOpen: false,
+      isJammed: false,
+      motorCurrentAmps: 0.0,
+      x: 1495,
+      y: 500,
+      lastCommandId: null,
+      lastUpdated: new Date().toISOString()
+    },
+    'GATE-04': {
+      id: 'GATE-04',
+      name: 'West Gate (Perimeter)',
+      type: 'MAINTENANCE_GATE',
+      location: 'West Fence Perimeter',
+      controllerId: 'ESP32-PERIM-02',
+      state: 'CLOSED',
+      targetState: 'CLOSED',
+      limitSwitchClosed: true,
+      limitSwitchOpen: false,
+      isJammed: false,
+      motorCurrentAmps: 0.0,
+      x: 105,
+      y: 500,
+      lastCommandId: null,
+      lastUpdated: new Date().toISOString()
+    },
+    'GATE-05': {
+      id: 'GATE-05',
+      name: 'Yard Gate (Rec Area)',
+      type: 'HEAVY_STEEL_GATE',
+      location: 'Yard Access Corridor',
+      controllerId: 'ESP32-ACCESS-01',
+      state: 'CLOSED',
+      targetState: 'CLOSED',
+      limitSwitchClosed: true,
+      limitSwitchOpen: false,
+      isJammed: false,
+      motorCurrentAmps: 0.0,
+      x: 740,
+      y: 440,
+      lastCommandId: null,
+      lastUpdated: new Date().toISOString()
+    },
+    'GATE-06': {
+      id: 'GATE-06',
+      name: 'Sally Port Inner Gate',
+      type: 'MANTrap_INTERLOCK_GATE',
+      location: 'Central Spine Intake',
+      controllerId: 'ESP32-ACCESS-01',
+      state: 'CLOSED',
+      targetState: 'CLOSED',
+      limitSwitchClosed: true,
+      limitSwitchOpen: false,
+      isJammed: false,
+      motorCurrentAmps: 0.0,
+      x: 800,
+      y: 710,
+      lastCommandId: null,
+      lastUpdated: new Date().toISOString()
+    },
+    'GATE-07': {
+      id: 'GATE-07',
+      name: 'Admin Gate (Staff Checkpoint)',
+      type: 'ELECTRONIC_TURNSTILE',
+      location: 'Administration Checkpoint',
+      controllerId: 'ESP32-ACCESS-01',
+      state: 'CLOSED',
+      targetState: 'CLOSED',
+      limitSwitchClosed: true,
+      limitSwitchOpen: false,
+      isJammed: false,
+      motorCurrentAmps: 0.0,
+      x: 1080,
+      y: 375,
+      lastCommandId: null,
+      lastUpdated: new Date().toISOString()
+    },
+    'GATE-08': {
+      id: 'GATE-08',
+      name: 'Isolation Security Gate',
+      type: 'HIGH_SECURITY_BARRIER',
+      location: 'Solitary Confinement Entry',
+      controllerId: 'ESP32-ACCESS-01',
+      state: 'CLOSED',
+      targetState: 'CLOSED',
+      limitSwitchClosed: true,
+      limitSwitchOpen: false,
+      isJammed: false,
+      motorCurrentAmps: 0.0,
+      x: 540,
+      y: 690,
+      lastCommandId: null,
+      lastUpdated: new Date().toISOString()
+    }
+  },
+
+  // Personnel (Prisoners and Officers)
+  people: {
+    // Prisoners
+    'P-1044': {
+      id: 'P-1044',
+      name: 'Marcus Vance',
+      alias: 'Apex',
+      type: 'PRISONER',
+      assignedCell: 'Cell A-102',
+      securityRisk: 'HIGH_SECURITY',
+      currentRoom: 'Cell A-102',
+      currentWaypoint: 'W_A102',
+      x: 340,
+      y: 140,
+      targetWaypoint: null,
+      path: [],
+      activity: 'Resting in Cell',
+      status: 'NORMAL', // 'NORMAL' | 'ALERT' | 'IN_TRANSIT' | 'RESTRICTED'
+      trackingStatus: 'SIMULATED TRACKING',
+      beaconFrequencyHz: 433.92,
+      batteryLevel: 94,
+      lastLocationUpdate: new Date().toISOString(),
+      associatedIncident: null,
+      routeHistory: [
+        { room: 'Cell A-102', x: 340, y: 140, timestamp: new Date(Date.now() - 3600000).toISOString() }
+      ]
+    },
+    'P-2089': {
+      id: 'P-2089',
+      name: 'David Chen',
+      alias: 'Specter',
+      type: 'PRISONER',
+      assignedCell: 'Cell B-102',
+      securityRisk: 'MEDIUM',
+      currentRoom: 'Cell B-102',
+      currentWaypoint: 'W_B102',
+      x: 770,
+      y: 140,
+      targetWaypoint: null,
+      path: [],
+      activity: 'Reading / Resting',
+      status: 'NORMAL',
+      trackingStatus: 'SIMULATED TRACKING',
+      beaconFrequencyHz: 433.92,
+      batteryLevel: 88,
+      lastLocationUpdate: new Date().toISOString(),
+      associatedIncident: null,
+      routeHistory: [
+        { room: 'Cell B-102', x: 770, y: 140, timestamp: new Date(Date.now() - 7200000).toISOString() }
+      ]
+    },
+    'P-3105': {
+      id: 'P-3105',
+      name: 'Jackson Miller',
+      alias: 'Jackrabbit',
+      type: 'PRISONER',
+      assignedCell: 'Cell C-101',
+      securityRisk: 'LOW',
+      currentRoom: 'Cell C-101',
+      currentWaypoint: 'W_C101',
+      x: 1145,
+      y: 140,
+      targetWaypoint: null,
+      path: [],
+      activity: 'Bunk Inspection',
+      status: 'NORMAL',
+      trackingStatus: 'SIMULATED TRACKING',
+      beaconFrequencyHz: 433.92,
+      batteryLevel: 91,
+      lastLocationUpdate: new Date().toISOString(),
+      associatedIncident: null,
+      routeHistory: []
+    },
+    'P-4412': {
+      id: 'P-4412',
+      name: 'Sarah Connor',
+      alias: 'Valkyrie',
+      type: 'PRISONER',
+      assignedCell: 'Medical Ward',
+      securityRisk: 'SPECIAL_CARE',
+      currentRoom: 'Medical Ward - Patient Bed 1',
+      currentWaypoint: 'W_MED_2',
+      x: 480,
+      y: 450,
+      targetWaypoint: null,
+      path: [],
+      activity: 'Medical Observation',
+      status: 'NORMAL',
+      trackingStatus: 'SIMULATED TRACKING',
+      beaconFrequencyHz: 433.92,
+      batteryLevel: 82,
+      lastLocationUpdate: new Date().toISOString(),
+      associatedIncident: 'INC-MED-01',
+      routeHistory: []
+    },
+    'P-5590': {
+      id: 'P-5590',
+      name: 'Tyler Durden',
+      alias: 'Ghost',
+      type: 'PRISONER',
+      assignedCell: 'Isolation Cell ISO-01',
+      securityRisk: 'MAXIMUM_ISOLATION',
+      currentRoom: 'Isolation Cell ISO-01',
+      currentWaypoint: 'W_ISO_CELL1',
+      x: 310,
+      y: 695,
+      targetWaypoint: null,
+      path: [],
+      activity: 'Solitary Confinement',
+      status: 'RESTRICTED',
+      trackingStatus: 'SIMULATED TRACKING',
+      beaconFrequencyHz: 433.92,
+      batteryLevel: 79,
+      lastLocationUpdate: new Date().toISOString(),
+      associatedIncident: null,
+      routeHistory: []
+    },
+    'P-6120': {
+      id: 'P-6120',
+      name: 'Robert Paulson',
+      alias: 'Moose',
+      type: 'PRISONER',
+      assignedCell: 'Cell B-104',
+      securityRisk: 'MEDIUM',
+      currentRoom: 'Common Exercise Yard',
+      currentWaypoint: 'W_YARD_1',
+      x: 740,
+      y: 480,
+      targetWaypoint: null,
+      path: [],
+      activity: 'Yard Recreation / Exercise',
+      status: 'NORMAL',
+      trackingStatus: 'SIMULATED TRACKING',
+      beaconFrequencyHz: 433.92,
+      batteryLevel: 95,
+      lastLocationUpdate: new Date().toISOString(),
+      associatedIncident: null,
+      routeHistory: []
+    },
+
+    // Officers
+    'OFC-702': {
+      id: 'OFC-702',
+      name: 'Capt. John Reyes',
+      type: 'OFFICER',
+      badge: 'OFC-702',
+      rfidCardId: 'CARD-OFC-702',
+      assignedZone: 'East Perimeter & Sally Port',
+      currentRoom: 'East Perimeter Upper',
+      currentWaypoint: 'W_PERIM_EAST_N',
+      x: 1495,
+      y: 300,
+      targetWaypoint: null,
+      path: [],
+      activity: 'Perimeter Fence Inspection',
+      patrolState: 'ACTIVE_PATROL',
+      status: 'NORMAL',
+      trackingStatus: 'SIMULATED TRACKING',
+      beaconFrequencyHz: 868.0,
+      batteryLevel: 99,
+      lastLocationUpdate: new Date().toISOString(),
+      associatedIncident: null,
+      routeHistory: []
+    },
+    'OFC-514': {
+      id: 'OFC-514',
+      name: 'Lt. Michael Sterling',
+      type: 'OFFICER',
+      badge: 'OFC-514',
+      rfidCardId: 'CARD-OFC-514',
+      assignedZone: 'Cell Blocks A & B',
+      currentRoom: 'North Main Corridor',
+      currentWaypoint: 'W_NORTH_A',
+      x: 370,
+      y: 305,
+      targetWaypoint: null,
+      path: [],
+      activity: 'Routine Cell Block Check',
+      patrolState: 'ACTIVE_PATROL',
+      status: 'NORMAL',
+      trackingStatus: 'SIMULATED TRACKING',
+      beaconFrequencyHz: 868.0,
+      batteryLevel: 97,
+      lastLocationUpdate: new Date().toISOString(),
+      associatedIncident: null,
+      routeHistory: []
+    },
+    'OFC-309': {
+      id: 'OFC-309',
+      name: 'Sgt. Amanda Cole',
+      type: 'OFFICER',
+      badge: 'OFC-309',
+      rfidCardId: 'CARD-OFC-309',
+      assignedZone: 'Central Control (SOC)',
+      currentRoom: 'Control Room - SOC Terminal A',
+      currentWaypoint: 'W_CONTROL_1',
+      x: 1140,
+      y: 720,
+      targetWaypoint: null,
+      path: [],
+      activity: 'SOC Monitoring & Command',
+      patrolState: 'STATIONARY_POST',
+      status: 'NORMAL',
+      trackingStatus: 'SIMULATED TRACKING',
+      beaconFrequencyHz: 868.0,
+      batteryLevel: 100,
+      lastLocationUpdate: new Date().toISOString(),
+      associatedIncident: null,
+      routeHistory: []
+    },
+    'OFC-118': {
+      id: 'OFC-118',
+      name: 'Officer David Kim',
+      type: 'OFFICER',
+      badge: 'OFC-118',
+      rfidCardId: 'CARD-OFC-118',
+      assignedZone: 'Medical & Sally Port Guard',
+      currentRoom: 'Medical Ward Checkpoint',
+      currentWaypoint: 'W_MED_ENTRY',
+      x: 420,
+      y: 375,
+      targetWaypoint: null,
+      path: [],
+      activity: 'Escort Duty & Checkpoint Guard',
+      patrolState: 'ACTIVE_PATROL',
+      status: 'NORMAL',
+      trackingStatus: 'SIMULATED TRACKING',
+      beaconFrequencyHz: 868.0,
+      batteryLevel: 92,
+      lastLocationUpdate: new Date().toISOString(),
+      associatedIncident: null,
+      routeHistory: []
+    }
+  },
+
+  // Active Incidents seeded to match screenshots
+  incidents: [
+    {
+      id: 'INC-PERIM-01',
+      title: 'Motion detected at East Perimeter',
+      rule: 'RULE D: Perimeter vibration combined with interrupted IR beam',
+      severity: 'CRITICAL', // 'CRITICAL' | 'WARNING' | 'MEDIUM' | 'INFO'
+      location: 'East Perimeter',
+      coordinates: { x: 1495, y: 480 },
+      associatedDevice: 'IR-BEAM-E',
+      associatedPerson: 'P-1044',
+      status: 'ACTIVE', // 'ACTIVE' | 'ACKNOWLEDGED' | 'RESOLVED'
+      acknowledgedBy: null,
+      resolvedBy: null,
+      timestamp: new Date(Date.now() - 420000).toISOString(), // ~7 mins ago
+      evidence: [
+        'VIB-FENCE-E reported abnormal acceleration (threshold > 2.4g)',
+        'IR-BEAM-E optical beam interrupted for 420ms',
+        'ESP32-PERIM-01 published alert on topic prisonGuard/perimeter/ir-beam/state'
+      ]
+    },
+    {
+      id: 'INC-DOOR-02',
+      title: 'Door opened - Block B (B-12)',
+      rule: 'RULE B: Door opens without a recent authorized RFID scan',
+      severity: 'WARNING',
+      location: 'Block B (B-102)',
+      coordinates: { x: 770, y: 170 },
+      associatedDevice: 'REED-B102',
+      associatedPerson: 'P-2089',
+      status: 'ACTIVE',
+      acknowledgedBy: null,
+      resolvedBy: null,
+      timestamp: new Date(Date.now() - 780000).toISOString(), // ~13 mins ago
+      evidence: [
+        'REED-B102 magnetic contact state changed from CLOSED to OPEN',
+        'No RFID badge authorization recorded within 30-second window on reader RFID-BLOCK-B',
+        'ESP32-CELL-02 reported spontaneous reed transition'
+      ]
+    },
+    {
+      id: 'INC-MED-01',
+      title: 'Medical assistance requested',
+      rule: 'RULE G: Medical assistance request / Duress call button triggered',
+      severity: 'MEDIUM',
+      location: 'Medical Ward Bed 1 (Cell C-04)',
+      coordinates: { x: 470, y: 410 },
+      associatedDevice: 'DURESS-MED-01',
+      associatedPerson: 'P-4412',
+      status: 'ACKNOWLEDGED',
+      acknowledgedBy: 'S. Patel (Admin)',
+      resolvedBy: null,
+      timestamp: new Date(Date.now() - 1020000).toISOString(), // ~17 mins ago
+      evidence: [
+        'DURESS-MED-01 hardwired panic circuit engaged at Nurse Station',
+        'ESP32-MED-01 GPIO 36 interrupt fired',
+        'Patient telemetry requested urgent vitals assessment'
+      ]
+    }
+  ],
+
+  // Recent Activity Feed (matching screenshot)
+  recentActivity: [
+    { id: 'ACT-1', timestamp: new Date(Date.now() - 420000).toISOString(), timeFormatted: '14:26:23', event: 'Escape Alert Triggered – East Perimeter', location: 'East Perimeter', status: 'CRITICAL', color: 'red' },
+    { id: 'ACT-2', timestamp: new Date(Date.now() - 600000).toISOString(), timeFormatted: '14:22:17', event: 'Gate 2 Opened – Authorized Staff Entry', location: 'Gate 2 - South', status: 'NORMAL', color: 'green' },
+    { id: 'ACT-3', timestamp: new Date(Date.now() - 780000).toISOString(), timeFormatted: '14:20:11', event: 'Door Opened Unexpectedly – Block B (B-12)', location: 'Block B', status: 'WARNING', color: 'amber' },
+    { id: 'ACT-4', timestamp: new Date(Date.now() - 1020000).toISOString(), timeFormatted: '14:18:50', event: 'Medical Request – Patient Ward Bed 1', location: 'Medical Ward', status: 'MEDIUM', color: 'blue' }
+  ],
+
+  // RFID Access Log History
+  accessLogs: [
+    { id: 'ACC-101', timestamp: new Date(Date.now() - 600000).toISOString(), readerId: 'RFID-SALLY-OUT', cardId: 'CARD-OFC-702', personName: 'Capt. John Reyes', role: 'OFFICER', location: 'South Sally Port Outer', result: 'GRANTED', reason: 'Authorized Duty Perimeter Patrol' },
+    { id: 'ACC-102', timestamp: new Date(Date.now() - 1200000).toISOString(), readerId: 'RFID-BLOCK-A', cardId: 'CARD-OFC-514', personName: 'Lt. Michael Sterling', role: 'OFFICER', location: 'Block A Entrance', result: 'GRANTED', reason: 'Authorized Cell Inspection' },
+    { id: 'ACC-103', timestamp: new Date(Date.now() - 1500000).toISOString(), readerId: 'RFID-ADMIN', cardId: 'UNKNOWN-CARD-99', personName: 'Unknown Credential', role: 'UNKNOWN', location: 'Admin Entrance', result: 'DENIED', reason: 'Unregistered / Invalid Security Token' }
+  ],
+
+  // Device telemetry logs
+  deviceLogs: [
+    { id: 'DEV-101', timestamp: new Date(Date.now() - 420000).toISOString(), deviceId: 'IR-BEAM-E', controllerId: 'ESP32-PERIM-01', event: 'STATE_CHANGE', reading: 'BROKEN', notes: 'Infrared line optical path occluded' },
+    { id: 'DEV-102', timestamp: new Date(Date.now() - 421000).toISOString(), deviceId: 'VIB-FENCE-E', controllerId: 'ESP32-PERIM-01', event: 'THRESHOLD_EXCEEDED', reading: '2.4g', notes: 'Piezoelectric vibration sensor peak' },
+    { id: 'DEV-103', timestamp: new Date(Date.now() - 600000).toISOString(), deviceId: 'GATE-02', controllerId: 'ESP32-PERIM-02', event: 'ACTUATOR_CONFIRMED', reading: 'OPEN', notes: 'Limit switch confirmed full travel' }
+  ],
+
+  // Active Demonstration Scenario
+  activeScenario: null // null | 'PERIMETER_ESCAPE' | 'OFFICER_PATROL' | 'GATE_FAILURE' | 'CONTROLLER_DISCONNECT' | 'MEDICAL_DURESS'
+};
