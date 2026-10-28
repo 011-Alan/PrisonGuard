@@ -14,6 +14,7 @@ export function SocketProvider({ children }) {
   const [commands, setCommands] = useState([]);
   const [recentMqttPackets, setRecentMqttPackets] = useState([]);
   const [lastSyncTime, setLastSyncTime] = useState(new Date().toISOString());
+  const [hardwareState, setHardwareState] = useState(null);
 
   // Fetch full state snapshot via REST
   const refreshState = useCallback(async () => {
@@ -28,6 +29,11 @@ export function SocketProvider({ children }) {
       if (cmdRes.ok) {
         const cmdData = await cmdRes.json();
         setCommands(cmdData.commands || []);
+      }
+      const hwRes = await fetch(`${API_BASE_URL}/api/hardware/status`);
+      if (hwRes.ok) {
+        const hwData = await hwRes.json();
+        setHardwareState(hwData);
       }
     } catch (e) {
       console.error('Failed to fetch snapshot:', e);
@@ -106,6 +112,30 @@ export function SocketProvider({ children }) {
 
     s.on('mqtt:packets', (packets) => {
       setRecentMqttPackets(packets);
+    });
+
+    s.on('hardware:state', (hwData) => {
+      setHardwareState(hwData);
+    });
+
+    s.on('hardware:event', (event) => {
+      setHardwareState(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          recentEvents: [event, ...(prev.recentEvents || []).slice(0, 24)]
+        };
+      });
+    });
+
+    s.on('hardware:command', (cmd) => {
+      setHardwareState(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          recentCommands: [cmd, ...(prev.recentCommands || []).slice(0, 24)]
+        };
+      });
     });
 
     // Latency heartbeat check
@@ -404,6 +434,37 @@ export function SocketProvider({ children }) {
     });
   };
 
+  const toggleHardware = async (enabled) => {
+    const res = await authFetch('/api/hardware/toggle', {
+      method: 'POST',
+      body: JSON.stringify({ enabled })
+    });
+    if (res.hardware) setHardwareState(res.hardware);
+    return res;
+  };
+
+  const toggleHardwareSync = async (enabled) => {
+    const res = await authFetch('/api/hardware/sync-toggle', {
+      method: 'POST',
+      body: JSON.stringify({ enabled })
+    });
+    if (res.hardware) setHardwareState(res.hardware);
+    return res;
+  };
+
+  const operatePhysicalDoor = async (action) => {
+    return authFetch('/api/hardware/door/operate', {
+      method: 'POST',
+      body: JSON.stringify({ action })
+    });
+  };
+
+  const testHardwareConnection = async () => {
+    return authFetch('/api/hardware/test', {
+      method: 'POST'
+    });
+  };
+
   return (
     <SocketContext.Provider
       value={{
@@ -413,7 +474,12 @@ export function SocketProvider({ children }) {
         commands,
         recentMqttPackets,
         lastSyncTime,
+        hardwareState,
         refreshState,
+        toggleHardware,
+        toggleHardwareSync,
+        operatePhysicalDoor,
+        testHardwareConnection,
         commandGate,
         jamGate,
         operateDoor,

@@ -1088,6 +1088,19 @@ export default function Dashboard({ onNavigateTab }) {
                 <div className="bg-gradient-to-r from-emerald-500 to-cyan-500 h-full rounded-full" style={{ width: '100%' }}></div>
               </div>
             </div>
+
+            <div className="mt-3 pt-3 border-t border-borderMuted flex items-center justify-between text-xs">
+              <span className="text-gray-400 text-[11px] flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+                Hardware Prototype (A-101)
+              </span>
+              <button
+                onClick={() => onNavigateTab && onNavigateTab('hardware')}
+                className="text-[11px] text-cyan-400 hover:underline font-medium"
+              >
+                ESP32 Console &rarr;
+              </button>
+            </div>
           </div>
         </div>
       </div>

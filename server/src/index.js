@@ -5,6 +5,7 @@ import cors from 'cors';
 import { config } from './config.js';
 import authRoutes from './routes/auth.js';
 import { createApiRouter } from './routes/api.js';
+import { createHardwareRouter } from './routes/hardware.js';
 import { SimulationEngine } from './simulation/engine.js';
 import { mqttSimulator } from './communication/mqttSimulator.js';
 
@@ -86,6 +87,7 @@ mqttSimulator.on('message', (packet) => {
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api', createApiRouter(engine));
+app.use('/api/hardware', createHardwareRouter(engine.hardwareManager));
 
 // Root Health Check & Readiness probe
 app.get('/health', (req, res) => {
@@ -97,6 +99,7 @@ app.get('/health', (req, res) => {
     systemHealth: engine.state.systemHealth,
     controllersOnline: Object.values(engine.state.controllers).filter(c => c.status === 'ONLINE').length,
     activeIncidents: engine.state.incidents.filter(i => i.status === 'ACTIVE').length,
+    hardwareIntegration: engine.hardwareManager ? engine.hardwareManager.connectionStatus : 'Disabled',
     timestamp: new Date().toISOString()
   });
 });
@@ -106,6 +109,9 @@ io.on('connection', (socket) => {
   // Authoritative snapshot on initial handshake
   socket.emit('state:full', engine.state);
   socket.emit('mqtt:packets', mqttSimulator.getRecentPackets(30));
+  if (engine.hardwareManager) {
+    socket.emit('hardware:state', engine.hardwareManager.getState());
+  }
 
   socket.on('disconnect', (reason) => {
     // Client disconnect handling

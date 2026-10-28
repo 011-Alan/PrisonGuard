@@ -13,6 +13,7 @@ import SecurityMonitoring from './pages/SecurityMonitoring';
 import HealthcareWelfare from './pages/HealthcareWelfare';
 import Announcements from './pages/Announcements';
 import IoTDeviceStatus from './pages/IoTDeviceStatus';
+import HardwareIntegration from './pages/HardwareIntegration';
 import MqttArchitecture from './pages/MqttArchitecture';
 import AuditLogs from './pages/AuditLogs';
 import Reports from './pages/Reports';
@@ -55,6 +56,7 @@ function AuthenticatedApp() {
           {activeTab === 'healthcare' && <HealthcareWelfare />}
           {activeTab === 'announcements' && <Announcements />}
           {activeTab === 'iot' && <IoTDeviceStatus />}
+          {activeTab === 'hardware' && <HardwareIntegration />}
           {activeTab === 'mqtt' && <MqttArchitecture />}
           {activeTab === 'audit' && <AuditLogs />}
           {activeTab === 'reports' && <Reports />}

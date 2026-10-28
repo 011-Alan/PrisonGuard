@@ -1,0 +1,53 @@
+/**
+ * PrisonGuard ESP32 Door Controller Configuration
+ * Copy this file to "config.h" and fill in your network and server credentials.
+ */
+
+#ifndef CONFIG_H
+#define CONFIG_H
+
+// ==========================================
+// 1. Wi-Fi Configuration
+// ==========================================
+const char* WIFI_SSID     = "YOUR_WIFI_SSID";
+const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+
+// ==========================================
+// 2. PrisonGuard Backend Server URL
+// ==========================================
+// For local testing on LAN, use your computer's local IP (e.g. "http://192.168.1.100:5000")
+// For deployed cloud backend, use your Render/production HTTPS URL (e.g. "https://prisonguard-backend.onrender.com")
+const char* SERVER_BASE_URL = "http://192.168.1.100:5000";
+
+// Controller Identifier and Authentication Secret Token
+// Must match HARDWARE_DEVICE_TOKEN in backend environment (default: "pg-hw-secret-token-esp32-demo")
+const char* CONTROLLER_ID = "ESP32-CELL-01";
+const char* DEVICE_TOKEN  = "pg-hw-secret-token-esp32-demo";
+
+// ==========================================
+// 3. GPIO Pin Mappings (ESP32-WROOM-32)
+// ==========================================
+#define PIN_SERVO      14   // PWM Servo signal (SG90 or MG996R)
+#define PIN_REED       4    // Magnetic Reed Switch (Internal PULL-UP, to GND)
+#define PIN_LED_GREEN  2    // Authorized Access Indicator (Active HIGH)
+#define PIN_LED_RED    15   // Denied / Alarm Indicator (Active HIGH)
+#define PIN_BUZZER     13   // Passive / Active Buzzer Tone Output
+
+// RC522 RFID SPI Pinout (VSPI Hardware Bus)
+#define PIN_RFID_SS    5    // Slave Select (SDA / CS)
+#define PIN_RFID_RST   22   // Reset Pin
+#define PIN_RFID_SCK   18   // SPI Clock (SCK)
+#define PIN_RFID_MISO  19   // SPI MISO
+#define PIN_RFID_MOSI  23   // SPI MOSI
+
+// ==========================================
+// 4. Actuator Calibration & Timing
+// ==========================================
+#define SERVO_ANGLE_CLOSED 0    // Angle representing locked/closed door
+#define SERVO_ANGLE_OPEN   90   // Angle representing open door
+
+#define POLL_INTERVAL_MS      500   // Command polling cycle frequency
+#define HEARTBEAT_INTERVAL_MS 5000  // Heartbeat ping interval to server
+#define RFID_COOLDOWN_MS      2500  // Avoid repeated scans of same card
+
+#endif // CONFIG_H

@@ -882,6 +882,212 @@ async function runTests() {
     assert(startShortD.status === 200, 'Starting scenario with short alias SCENARIO_D succeeds');
     assert(engine.state.activeScenario === 'SCENARIO_D_COMPROMISED_OFFICER', 'Alias SCENARIO_D resolves to SCENARIO_D_COMPROMISED_OFFICER');
 
+    // 40. Optional Hardware Integration Snapshot & Toggles
+    console.log('\n[SUITE 40: Optional Hardware Integration Snapshot & Toggles]');
+    const hwStatusInitial = await request('/api/hardware/status');
+    assert(hwStatusInitial.status === 200, 'Hardware status endpoint returns HTTP 200');
+    assert(hwStatusInitial.data?.enabled === false, 'Hardware integration defaults to disabled (software-only default)');
+    assert(hwStatusInitial.data?.targetDoorId === 'DOOR-A101', 'Hardware target bound to Cell A-101 (DOOR-A101)');
+    assert(hwStatusInitial.data?.devices['SERVO-DOOR-01'] !== undefined, 'Physical servo registered in component manifest');
+    assert(hwStatusInitial.data?.devices['REED-A101-PHYSICAL'] !== undefined, 'Physical reed switch registered in component manifest');
+
+    // Toggle hardware enabled
+    const hwToggleOn = await request('/api/hardware/toggle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ enabled: true })
+    });
+    assert(hwToggleOn.status === 200, 'Toggling hardware enabled succeeds');
+    assert(hwToggleOn.data?.hardwareState?.enabled === true, 'Hardware state confirmed enabled');
+
+    // Toggle bidirectional sync
+    const hwSyncToggle = await request('/api/hardware/sync-toggle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ enabled: true })
+    });
+    assert(hwSyncToggle.status === 200, 'Toggling physical-to-software sync succeeds');
+    assert(hwSyncToggle.data?.hardwareState?.syncHardwareToSimulation === true, 'Sync flag enabled');
+
+    // 41. Decoupled Non-Blocking Operation (Software Door Commands With Hardware Enabled)
+    console.log('\n[SUITE 41: Decoupled Non-Blocking Operation]');
+    // Unlock DOOR-A101 first (cell doors require unlock before physical transit)
+    const unlockA101 = await request('/api/doors/DOOR-A101/lock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ action: 'UNLOCK' })
+    });
+    assert(unlockA101.status === 200, 'Door unlocked before physical opening');
+
+    const swDoorOperate = await request('/api/doors/DOOR-A101/operate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ action: 'OPEN' })
+    });
+    assert(swDoorOperate.status === 200, 'Software door operation completes non-blocking without hardware delay');
+    assert(
+      engine.state.doors['DOOR-A101'].position === 'OPEN' ||
+      engine.state.doors['DOOR-A101'].position === 'OPENING' ||
+      engine.state.doors['DOOR-A101'].state === 'OPEN',
+      'Simulation engine door state immediately updated to OPEN / OPENING'
+    );
+
+    const hwStatusAfterCmd = await request('/api/hardware/status');
+    assert(hwStatusAfterCmd.data?.pendingCommandsCount > 0, 'Hardware command queued for target door');
+
+    // 42. ESP32 Controller Communication, Authentication & Heartbeat
+    console.log('\n[SUITE 42: ESP32 Controller Heartbeat, Authentication & Polling]');
+    const hwToken = process.env.HARDWARE_DEVICE_TOKEN || 'pg-hw-secret-token-esp32-demo';
+
+    // Unauthorized heartbeat rejected
+    const badHeartbeat = await request('/api/hardware/heartbeat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Device-Token': 'wrong-token' },
+      body: JSON.stringify({ controllerId: 'ESP32-CELL-01' })
+    });
+    assert(badHeartbeat.status === 401, 'Controller heartbeat without valid X-Device-Token is rejected with HTTP 401');
+
+    // Valid heartbeat
+    const goodHeartbeat = await request('/api/hardware/heartbeat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Device-Token': hwToken },
+      body: JSON.stringify({
+        controllerId: 'ESP32-CELL-01',
+        doorState: 'CLOSED',
+        servoAngle: 0,
+        reedSwitch: 'CLOSED',
+        uptimeSeconds: 120,
+        isSimulated: true
+      })
+    });
+    assert(goodHeartbeat.status === 200, 'Valid controller heartbeat accepted with HTTP 200');
+    assert(goodHeartbeat.data?.connectionStatus === 'CONNECTED', 'Controller status transitions to CONNECTED');
+
+    // Poll command
+    const pollCmd = await request('/api/hardware/commands/poll', {
+      headers: { 'X-Device-Token': hwToken }
+    });
+    assert(pollCmd.status === 200, 'Controller polls commands successfully');
+    assert(pollCmd.data?.hasCommand === true, 'Poll returns queued door command');
+    const queuedCmdId = pollCmd.data?.command?.id;
+
+    // Acknowledge command
+    const ackCmd = await request(`/api/hardware/commands/${queuedCmdId}/ack`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Device-Token': hwToken },
+      body: JSON.stringify({
+        status: 'SUCCESS',
+        servoAngle: 90,
+        observedState: 'OPEN'
+      })
+    });
+    assert(ackCmd.status === 200, 'Controller acknowledges command execution');
+    assert(ackCmd.data?.command?.status === 'ACKNOWLEDGED', 'Command marked ACKNOWLEDGED in backend');
+
+    // 43. Discrepancy Detection & Alignment Command
+    console.log('\n[SUITE 43: Discrepancy Detection & Physical Actuation]');
+    // Now simulate reed switch reporting CLOSED while software is OPEN
+    const reedMismatch = await request('/api/hardware/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Device-Token': hwToken },
+      body: JSON.stringify({
+        type: 'PHYSICAL_DOOR_STATE_CHANGED',
+        controllerId: 'ESP32-CELL-01',
+        details: { doorId: 'DOOR-A101-PHYSICAL', reedState: 'CLOSED', servoAngle: 0 }
+      })
+    });
+    assert(reedMismatch.status === 200, 'Physical event accepted');
+
+    // Direct physical door operate command
+    const directPhysOperate = await request('/api/hardware/door/operate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ action: 'OPEN' })
+    });
+    assert(directPhysOperate.status === 200, 'Direct physical door actuation command queued');
+    assert(directPhysOperate.data?.command?.payload?.action === 'OPEN', 'Actuation payload specifies OPEN (90°)');
+
+    // Safe connectivity test
+    const pingTest = await request('/api/hardware/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` }
+    });
+    assert(pingTest.status === 200, 'Diagnostic connectivity test executes safely');
+    assert(pingTest.data?.success === true, 'Active controller passes connectivity test');
+
+    // 44. Bidirectional Physical Sensor Sync with Anti-Loop Guard
+    console.log('\n[SUITE 44: Bidirectional Physical Sync & Anti-Loop Guard]');
+    // Reset software door to CLOSED
+    engine.state.doors['DOOR-A101'].lockState = 'UNLOCKED';
+    engine.state.doors['DOOR-A101'].position = 'CLOSED';
+    engine.state.doors['DOOR-A101'].state = 'CLOSED';
+    assert(engine.state.doors['DOOR-A101'].position === 'CLOSED', 'Door reset to CLOSED in engine');
+
+    // Send reed switch OPEN event with syncHardwareToSimulation active
+    const syncEvent = await request('/api/hardware/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Device-Token': hwToken },
+      body: JSON.stringify({
+        type: 'PHYSICAL_DOOR_STATE_CHANGED',
+        controllerId: 'ESP32-CELL-01',
+        details: { doorId: 'DOOR-A101-PHYSICAL', reedState: 'OPEN', servoAngle: 90 }
+      })
+    });
+    assert(syncEvent.status === 200, 'Physical reed event processed');
+    assert(
+      engine.state.doors['DOOR-A101'].position === 'OPEN' ||
+      engine.state.doors['DOOR-A101'].position === 'OPENING' ||
+      engine.state.doors['DOOR-A101'].state === 'OPEN',
+      'Software door synchronized automatically to OPEN from physical reed switch'
+    );
+
+    // 45. Hardware RFID Access Verification & Threat Rejection
+    console.log('\n[SUITE 45: Hardware RFID Badge Evaluation & Security Control]');
+    // Valid officer badge
+    const hwValidRfid = await request('/api/hardware/rfid/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Device-Token': hwToken },
+      body: JSON.stringify({
+        uid: 'CARD-OFC-514',
+        cardId: 'CARD-OFC-514',
+        readerId: 'RFID-RC522-01',
+        location: 'Cell Block A (A-101)'
+      })
+    });
+    assert(hwValidRfid.status === 200, 'RFID scan evaluation responds with HTTP 200');
+    assert(hwValidRfid.data?.accessGranted === true, 'Authorized officer badge grants access');
+    assert(hwValidRfid.data?.holder?.role === 'OFFICER', 'Badge holder identified as officer');
+
+    // Revoked badge
+    const hwRevokedRfid = await request('/api/hardware/rfid/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Device-Token': hwToken },
+      body: JSON.stringify({
+        uid: 'CARD-REVOKED-999',
+        cardId: 'CARD-REVOKED-999',
+        readerId: 'RFID-RC522-01',
+        location: 'Cell Block A (A-101)'
+      })
+    });
+    assert(hwRevokedRfid.status === 200, 'Revoked RFID scan responds with HTTP 200');
+    assert(hwRevokedRfid.data?.accessGranted === false, 'Revoked badge denies access');
+    assert(hwRevokedRfid.data?.decision === 'DENIED_REVOKED_BADGE', 'Security system detects REVOKED badge');
+
+    // Unknown/unregistered badge
+    const hwUnknownRfid = await request('/api/hardware/rfid/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Device-Token': hwToken },
+      body: JSON.stringify({
+        uid: 'CARD-UNKNOWN-000',
+        cardId: 'CARD-UNKNOWN-000',
+        readerId: 'RFID-RC522-01',
+        location: 'Cell Block A (A-101)'
+      })
+    });
+    assert(hwUnknownRfid.status === 200, 'Unknown RFID scan responds with HTTP 200');
+    assert(hwUnknownRfid.data?.accessGranted === false, 'Unregistered badge denies access');
+    assert(hwUnknownRfid.data?.decision === 'DENIED_UNKNOWN_CARD', 'Decision correctly flagged as DENIED_UNKNOWN_CARD');
+
 
   } catch (err) {
     console.error('Test execution error:', err);

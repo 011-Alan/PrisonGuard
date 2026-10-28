@@ -12,12 +12,14 @@ import {
   canTransitionPrisoner,
   canTransitionOfficer
 } from './stateMachines.js';
+import { HardwareManager } from '../hardware/hardwareManager.js';
 
 export class SimulationEngine {
   constructor(io) {
     this.io = io;
     this.state = JSON.parse(JSON.stringify(INITIAL_STATE));
     this.revokedCards = new Set();
+    this.hardwareManager = new HardwareManager(this, io);
 
     // Restore persisted incidents or seed baseline
     const persistedIncidents = db.getIncidents();
@@ -831,6 +833,17 @@ export class SimulationEngine {
     const cmd = this.createCommandRecord({ targetId: doorId, targetType: 'DOOR', action, user });
     door.position = (action === 'OPEN' ? 'OPENING' : 'CLOSING');
     door.lastUpdated = new Date().toISOString();
+
+    // Optional ESP32 Physical Prototype Integration (Section 4)
+    if (this.hardwareManager && this.hardwareManager.enabled && doorId === this.hardwareManager.targetDoorId) {
+      if (user?.username !== 'PHYSICAL_SENSOR_SYNC') {
+        try {
+          this.hardwareManager.dispatchDoorCommand(action, 'SOFTWARE_ADMIN', user);
+        } catch (hwErr) {
+          console.warn('[HardwareManager] Physical door command dispatch notice:', hwErr.message);
+        }
+      }
+    }
 
     this.updateCommandStage(cmd.id, 'ESP32_GATEWAY', 'COMPLETED', `Command dispatched to controller ${door.controllerId}`);
     this.updateCommandStage(cmd.id, 'ACTUATOR_TRANSITION', 'IN_PROGRESS', `Moving door towards ${action}`);
