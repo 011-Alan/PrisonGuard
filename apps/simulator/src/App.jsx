@@ -3,9 +3,11 @@ import { SocketProvider, useSocket } from './context/SocketContext';
 import PrisonFloorPlan from './components/PrisonFloorPlan';
 import PersonInspector from './components/PersonInspector';
 import DeviceInspector from './components/DeviceInspector';
+import CommunicationInspector from './components/CommunicationInspector';
+import DisplaySettingsPanel from './components/DisplaySettingsPanel';
 import ScenarioToolbar from './components/ScenarioToolbar';
 import StatusBar from './components/StatusBar';
-import { Megaphone, X, AlertOctagon } from 'lucide-react';
+import { Megaphone, X, AlertOctagon, Sliders } from 'lucide-react';
 
 function SimulatorMain() {
   const { state, activeAnnouncement, setActiveAnnouncement } = useSocket();
@@ -14,8 +16,40 @@ function SimulatorMain() {
   const [showIoTOverlay, setShowIoTOverlay] = useState(true);
   const [selectedPerson, setSelectedPerson] = useState(null);
   const [selectedDevice, setSelectedDevice] = useState(null);
+  const [selectedCommLink, setSelectedCommLink] = useState(null);
   const [isFollowing, setIsFollowing] = useState(false);
   const [showRoute, setShowRoute] = useState(false);
+  const [showDisplaySettings, setShowDisplaySettings] = useState(false);
+  const [displaySettings, setDisplaySettings] = useState({
+    showPeopleLabels: true,
+    showHealthBars: true,
+    showSpeechBubbles: true,
+    showCameraFov: true,
+    showSensors: true,
+    showActuators: true,
+    showAccessPoints: true,
+    showIoTLinks: true,
+    showLegend: true
+  });
+
+  const handleToggleDisplaySetting = (key) => {
+    setDisplaySettings((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const handleApplyDemoPreset = () => {
+    setDisplaySettings({
+      showPeopleLabels: true,
+      showHealthBars: true,
+      showSpeechBubbles: true,
+      showCameraFov: true,
+      showSensors: false,
+      showActuators: false,
+      showAccessPoints: false,
+      showIoTLinks: false,
+      showLegend: false
+    });
+    setShowDisplaySettings(false);
+  };
 
   // Parse URL search params (e.g. ?focusPerson=P-1044 or ?focusIncident=...)
   useEffect(() => {
@@ -74,9 +108,19 @@ function SimulatorMain() {
   };
 
   const isLockdown = state?.lockdown?.isActive;
+  const isBreached = state?.securityControlBreach?.isBreached;
 
   return (
     <div className="w-screen h-screen relative bg-[#080d1a] overflow-hidden select-none">
+      {/* Critical Security Control Breach Banner (Section 22) */}
+      {isBreached && (
+        <div className="absolute top-0 left-0 right-0 z-50 bg-gradient-to-r from-red-950 via-red-600 to-red-950 text-white font-extrabold text-xs tracking-wider py-2 px-4 flex items-center justify-center gap-3 shadow-2xl border-b-2 border-red-400 animate-pulse">
+          <AlertOctagon className="w-4 h-4 fill-white text-red-600" />
+          <span>⚠️ CENTRAL SECURITY CONTROL BREACH: OPERATOR SUP-309 INCAPACITATED • CREDENTIALS REVOKED • SYSTEM ISOLATED</span>
+          <AlertOctagon className="w-4 h-4 fill-white text-red-600" />
+        </div>
+      )}
+
       {/* Top Scenario & Control Toolbar */}
       <ScenarioToolbar
         zoom={zoom}
@@ -85,10 +129,11 @@ function SimulatorMain() {
         onResetView={handleResetView}
         showIoTOverlay={showIoTOverlay}
         onToggleIoTOverlay={() => setShowIoTOverlay(!showIoTOverlay)}
+        onOpenDisplaySettings={() => setShowDisplaySettings(true)}
       />
 
       {/* Emergency Facility Lockdown Banner */}
-      {isLockdown && (
+      {isLockdown && !isBreached && (
         <div className="absolute top-16 left-0 right-0 z-40 bg-red-600/90 text-white font-extrabold text-xs tracking-widest uppercase py-1.5 px-4 flex items-center justify-center gap-3 shadow-xl backdrop-blur-md animate-pulse">
           <AlertOctagon className="w-4 h-4 fill-white text-red-600" />
           <span>FACILITY EMERGENCY LOCKDOWN ACTIVE • ALL BARRIERS AND GATES SECURED</span>
@@ -131,6 +176,8 @@ function SimulatorMain() {
         }}
         isFollowing={isFollowing}
         showRoute={showRoute}
+        displaySettings={displaySettings}
+        onSelectCommLink={(link) => setSelectedCommLink(link)}
       />
 
       {/* Person Inspector Drawer */}
@@ -156,8 +203,26 @@ function SimulatorMain() {
         />
       )}
 
+      {/* IoT Communication Channel Inspector Modal (Section 19) */}
+      {selectedCommLink && (
+        <CommunicationInspector
+          link={selectedCommLink}
+          onClose={() => setSelectedCommLink(null)}
+        />
+      )}
+
+      {/* Display Options Settings Panel (Section 23) */}
+      {showDisplaySettings && (
+        <DisplaySettingsPanel
+          settings={displaySettings}
+          onToggle={handleToggleDisplaySetting}
+          onClose={() => setShowDisplaySettings(false)}
+          onApplyDemoPreset={handleApplyDemoPreset}
+        />
+      )}
+
       {/* Bottom Status Bar */}
-      <StatusBar />
+      <StatusBar onOpenCommInspector={(link) => setSelectedCommLink(link)} onOpenDisplaySettings={() => setShowDisplaySettings(true)} />
     </div>
   );
 }

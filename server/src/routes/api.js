@@ -2,6 +2,8 @@ import express from 'express';
 import { auditLogger } from '../utils/audit.js';
 import { mqttSimulator } from '../communication/mqttSimulator.js';
 import { ROOMS, WAYPOINTS } from '../simulation/waypoints.js';
+import { SCENARIO_REGISTRY } from '../simulation/scenarios.js';
+import { IOT_TOPOLOGY_METADATA } from '../simulation/state.js';
 import { authenticate, authorize } from '../auth/authMiddleware.js';
 
 export function createApiRouter(engine) {
@@ -392,6 +394,179 @@ export function createApiRouter(engine) {
     } catch (err) {
       res.status(400).json({ error: err.message });
     }
+  });
+
+  // Camera Sweep & Manual Pan
+  router.post('/cameras/:id/sweep', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      const { id } = req.params;
+      const { action } = req.body || {};
+      const cam = engine.setCameraSweep(id, action || 'TOGGLE', req.user);
+      res.json({ success: true, camera: cam });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  router.post('/cameras/:id/pan', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      const { id } = req.params;
+      const { angle } = req.body || {};
+      if (angle === undefined) return res.status(400).json({ error: 'Angle is required' });
+      const cam = engine.setCameraPan(id, angle, req.user);
+      res.json({ success: true, camera: cam });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Officer RFID Credential Revocation (Admin Only)
+  router.post('/officers/:id/revoke-credential', authenticate, authorize(['ADMIN']), (req, res) => {
+    try {
+      const { id } = req.params;
+      const officer = engine.revokeOfficerCredential(id, req.user);
+      res.json({ success: true, officer });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // External Visitors
+  router.post('/visitors/arrive', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      const visitor = engine.triggerVisitorArrival(req.body || {});
+      res.json({ success: true, visitor });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  router.post('/visitors/:id/decision', authenticate, authorize(['ADMIN']), (req, res) => {
+    try {
+      const { id } = req.params;
+      const { decision } = req.body || {};
+      if (!['APPROVE', 'DENY'].includes(decision)) {
+        return res.status(400).json({ error: 'Decision must be APPROVE or DENY' });
+      }
+      const visitor = engine.handleVisitorDecision(id, decision, req.user);
+      res.json({ success: true, visitor });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Suspicious Activity Trigger
+  router.post('/suspicious/trigger', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      const activity = engine.triggerSuspiciousActivity(req.body || {});
+      res.json({ success: true, activity });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Health Change Simulation
+  router.post('/health/change', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      const { personId, delta, reason } = req.body || {};
+      if (!personId || delta === undefined) {
+        return res.status(400).json({ error: 'personId and delta are required' });
+      }
+      const person = engine.applyHealthChange(personId, delta, reason);
+      res.json({ success: true, person });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Security Control Breach
+  router.post('/security/breach', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      engine.triggerSecurityControlBreach();
+      res.json({ success: true, breach: engine.state.securityControlBreach });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  router.post('/security/breach/reset', authenticate, authorize(['ADMIN']), (req, res) => {
+    try {
+      engine.resetSecurityControlBreach();
+      res.json({ success: true, breach: engine.state.securityControlBreach });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Deterministic Scenario Engine Endpoints
+  router.get('/scenarios', (req, res) => {
+    res.json({
+      scenarios: SCENARIO_REGISTRY,
+      activeScenario: engine.state.activeScenario,
+      elapsedSec: engine.state.scenarioElapsedSec || 0,
+      isPaused: engine.scenarios?.isPaused || false
+    });
+  });
+
+  router.post('/scenarios/:id/start', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      const { id } = req.params;
+      const { seed } = req.body || {};
+      engine.scenarios.start(id, seed || 42);
+      res.json({ success: true, activeScenario: id, seed: seed || 42 });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  router.post('/scenarios/pause', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      engine.scenarios.pause();
+      res.json({ success: true, isPaused: true });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  router.post('/scenarios/resume', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      engine.scenarios.resume();
+      res.json({ success: true, isPaused: false });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  router.post('/scenarios/stop', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      engine.scenarios.stop();
+      res.json({ success: true, activeScenario: null });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  router.post('/scenarios/reset', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      engine.scenarios.reset();
+      res.json({ success: true, message: 'Simulation reset to baseline' });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // IoT Topology & Communication Flow Data
+  router.get('/topology', (req, res) => {
+    res.json({
+      accessPoints: engine.state.accessPoints,
+      controllers: engine.state.controllers,
+      devices: engine.state.devices,
+      gates: engine.state.gates,
+      doors: engine.state.doors,
+      speakers: engine.state.speakers,
+      cameras: engine.state.cameras,
+      metadata: IOT_TOPOLOGY_METADATA
+    });
   });
 
   // --- Officer Dispatch Commands (Admin to Officer) ---

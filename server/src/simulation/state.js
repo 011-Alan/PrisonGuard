@@ -1,6 +1,79 @@
 import { ROOMS, WAYPOINTS } from './waypoints.js';
 import { CAMERAS } from './cctv.js';
 
+export const ACCESS_POINTS = {
+  'AP-NORTH-CORR': {
+    id: 'AP-NORTH-CORR',
+    name: 'North Corridor Access Point',
+    location: 'North Main Corridor Central',
+    zone: 'NORTH_CORRIDOR',
+    x: 800,
+    y: 250,
+    status: 'ONLINE',
+    coverageRadius: 280,
+    ssid: 'PRISON-NET-SECURE-WPA3',
+    frequency: '5 GHz / 2.4 GHz',
+    channel: 36,
+    associatedControllers: ['ESP32-CELL-01', 'ESP32-CELL-02', 'ESP32-CELL-03']
+  },
+  'AP-YARD-SALLY': {
+    id: 'AP-YARD-SALLY',
+    name: 'Yard & Sally Port Access Point',
+    location: 'Common Yard South Spine',
+    zone: 'COMMON_YARD',
+    x: 800,
+    y: 550,
+    status: 'ONLINE',
+    coverageRadius: 260,
+    ssid: 'PRISON-NET-SECURE-WPA3',
+    frequency: '2.4 GHz (Long Range)',
+    channel: 6,
+    associatedControllers: ['ESP32-ACCESS-01', 'ESP32-PERIM-02']
+  },
+  'AP-ADMIN-SOC': {
+    id: 'AP-ADMIN-SOC',
+    name: 'Admin & SOC Secure AP',
+    location: 'Administration Central',
+    zone: 'ADMIN_SOC',
+    x: 1100,
+    y: 650,
+    status: 'ONLINE',
+    coverageRadius: 250,
+    ssid: 'PRISON-NET-ADMIN-ISOLATED',
+    frequency: '5 GHz',
+    channel: 149,
+    associatedControllers: ['ESP32-CAM-HUB']
+  },
+  'AP-WEST-MED': {
+    id: 'AP-WEST-MED',
+    name: 'Medical Ward Access Point',
+    location: 'Medical Ward Corridor',
+    zone: 'WEST_MED',
+    x: 350,
+    y: 500,
+    status: 'ONLINE',
+    coverageRadius: 240,
+    ssid: 'PRISON-NET-SECURE-WPA3',
+    frequency: '5 GHz',
+    channel: 44,
+    associatedControllers: ['ESP32-MED-01']
+  },
+  'AP-EAST-PERIM': {
+    id: 'AP-EAST-PERIM',
+    name: 'East Perimeter Relay AP',
+    location: 'East Perimeter Tower Relay',
+    zone: 'EAST_PERIM',
+    x: 1400,
+    y: 400,
+    status: 'ONLINE',
+    coverageRadius: 280,
+    ssid: 'PRISON-NET-PERIMETER-MESH',
+    frequency: '2.4 GHz (Outdoor Mesh)',
+    channel: 11,
+    associatedControllers: ['ESP32-PERIM-01']
+  }
+};
+
 export const INITIAL_STATE = {
   // System Health & Stats
   systemHealth: 98,
@@ -10,11 +83,31 @@ export const INITIAL_STATE = {
   // CCTV Surveillance System (Perception Layer)
   cameras: JSON.parse(JSON.stringify(CAMERAS)),
 
+  // Wi-Fi Access Points (Communication Layer)
+  accessPoints: JSON.parse(JSON.stringify(ACCESS_POINTS)),
+
   // Pending Officer-to-Central Radio Communication Requests (Workflow A)
   officerRadioRequests: [],
 
   // Administrator-to-Officer Task Assignments
   officerTasks: [],
+
+  // Suspicious Activity Engine
+  suspiciousActivities: [],
+
+  // External Visitors (e.g. Detective / Inspector arrivals)
+  externalVisitors: [],
+
+  // Central Security Control Breach State Machine
+  securityControlBreach: {
+    isBreached: false,
+    incapacitatedOfficerId: null,
+    title: '',
+    message: '',
+    affectedControls: [],
+    severity: 'NORMAL',
+    activatedAt: null
+  },
 
   // Facility Simulation Clock
   simulationClock: {
@@ -515,6 +608,9 @@ export const INITIAL_STATE = {
       path: [],
       activity: 'Resting in Cell',
       status: 'NORMAL', // 'NORMAL' | 'ESCAPING' | 'DETAINED' | 'IN_TRANSIT' | 'RESTRICTED'
+      health: 100,
+      maxHealth: 100,
+      healthState: 'HEALTHY', // 'HEALTHY' | 'INJURED' | 'INCAPACITATED' | 'RECEIVING_CARE' | 'RECOVERING' | 'RECOVERED'
       trackingStatus: 'SIMULATED TRACKING',
       beaconFrequencyHz: 433.92,
       batteryLevel: 94,
@@ -551,6 +647,9 @@ export const INITIAL_STATE = {
       path: [],
       activity: 'Reading / Resting',
       status: 'NORMAL',
+      health: 100,
+      maxHealth: 100,
+      healthState: 'HEALTHY',
       trackingStatus: 'SIMULATED TRACKING',
       beaconFrequencyHz: 433.92,
       batteryLevel: 88,
@@ -586,6 +685,9 @@ export const INITIAL_STATE = {
       path: [],
       activity: 'Bunk Inspection',
       status: 'NORMAL',
+      health: 100,
+      maxHealth: 100,
+      healthState: 'HEALTHY',
       trackingStatus: 'SIMULATED TRACKING',
       beaconFrequencyHz: 433.92,
       batteryLevel: 91,
@@ -619,6 +721,9 @@ export const INITIAL_STATE = {
       path: [],
       activity: 'Medical Observation',
       status: 'NORMAL',
+      health: 85,
+      maxHealth: 100,
+      healthState: 'RECOVERING',
       trackingStatus: 'SIMULATED TRACKING',
       beaconFrequencyHz: 433.92,
       batteryLevel: 82,
@@ -653,6 +758,9 @@ export const INITIAL_STATE = {
       path: [],
       activity: 'Solitary Confinement',
       status: 'RESTRICTED',
+      health: 90,
+      maxHealth: 100,
+      healthState: 'HEALTHY',
       trackingStatus: 'SIMULATED TRACKING',
       beaconFrequencyHz: 433.92,
       batteryLevel: 79,
@@ -687,6 +795,9 @@ export const INITIAL_STATE = {
       path: [],
       activity: 'Yard Recreation / Exercise',
       status: 'NORMAL',
+      health: 100,
+      maxHealth: 100,
+      healthState: 'HEALTHY',
       trackingStatus: 'SIMULATED TRACKING',
       beaconFrequencyHz: 433.92,
       batteryLevel: 95,
@@ -725,6 +836,12 @@ export const INITIAL_STATE = {
       recoveryTimerSec: 0,
       patrolState: 'ACTIVE_PATROL',
       status: 'NORMAL',
+      health: 100,
+      maxHealth: 100,
+      healthState: 'HEALTHY',
+      communicationStatus: 'ONLINE', // 'ONLINE' | 'RADIO_CHECK' | 'DEGRADED' | 'OFFLINE'
+      credentialStatus: 'ACTIVE',   // 'ACTIVE' | 'SUSPENDED' | 'REVOKED'
+      availability: 'AVAILABLE',    // 'AVAILABLE' | 'BUSY' | 'RESPONDING' | 'INCAPACITATED' | 'COMPROMISED'
       shift: 'Day Shift (06:00 - 18:00)',
       dutyStatus: 'ON_DUTY',
       trackingStatus: 'SIMULATED TRACKING',
@@ -756,6 +873,12 @@ export const INITIAL_STATE = {
       recoveryTimerSec: 0,
       patrolState: 'ACTIVE_PATROL',
       status: 'NORMAL',
+      health: 100,
+      maxHealth: 100,
+      healthState: 'HEALTHY',
+      communicationStatus: 'ONLINE',
+      credentialStatus: 'ACTIVE',
+      availability: 'AVAILABLE',
       shift: 'Day Shift (06:00 - 18:00)',
       dutyStatus: 'ON_DUTY',
       trackingStatus: 'SIMULATED TRACKING',
@@ -787,6 +910,12 @@ export const INITIAL_STATE = {
       recoveryTimerSec: 0,
       patrolState: 'ACTIVE_PATROL',
       status: 'NORMAL',
+      health: 100,
+      maxHealth: 100,
+      healthState: 'HEALTHY',
+      communicationStatus: 'ONLINE',
+      credentialStatus: 'ACTIVE',
+      availability: 'AVAILABLE',
       shift: 'Day Shift (06:00 - 18:00)',
       dutyStatus: 'ON_DUTY',
       trackingStatus: 'SIMULATED TRACKING',
@@ -815,6 +944,12 @@ export const INITIAL_STATE = {
       activity: 'SOC Monitoring & Command',
       patrolState: 'STATIONARY_POST',
       status: 'NORMAL',
+      health: 100,
+      maxHealth: 100,
+      healthState: 'HEALTHY',
+      communicationStatus: 'ONLINE',
+      credentialStatus: 'ACTIVE',
+      availability: 'AVAILABLE',
       shift: 'Day Shift (06:00 - 18:00)',
       dutyStatus: 'ON_DUTY_SUPERVISOR',
       trackingStatus: 'SIMULATED TRACKING',
@@ -843,6 +978,12 @@ export const INITIAL_STATE = {
       activity: 'Medical Clinic Rounds & Patient Review',
       patrolState: 'CLINICAL_ROUNDS',
       status: 'NORMAL',
+      health: 100,
+      maxHealth: 100,
+      healthState: 'HEALTHY',
+      communicationStatus: 'ONLINE',
+      credentialStatus: 'ACTIVE',
+      availability: 'AVAILABLE',
       shift: 'Medical Shift (08:00 - 17:00)',
       dutyStatus: 'ON_DUTY_MEDICAL',
       trackingStatus: 'SIMULATED TRACKING',
@@ -869,6 +1010,12 @@ export const INITIAL_STATE = {
       activity: 'Dispensing Scheduled Medication',
       patrolState: 'MEDICATION_DISPENSE',
       status: 'NORMAL',
+      health: 100,
+      maxHealth: 100,
+      healthState: 'HEALTHY',
+      communicationStatus: 'ONLINE',
+      credentialStatus: 'ACTIVE',
+      availability: 'AVAILABLE',
       shift: 'Medical Shift (07:30 - 16:30)',
       dutyStatus: 'ON_DUTY_MEDICAL',
       trackingStatus: 'SIMULATED TRACKING',
@@ -964,5 +1111,40 @@ export const INITIAL_STATE = {
   ],
 
   // Active Demonstration Scenario
-  activeScenario: null // null | 'PERIMETER_ESCAPE' | 'OFFICER_PATROL' | 'GATE_FAILURE' | 'CONTROLLER_DISCONNECT' | 'MEDICAL_DURESS'
+  activeScenario: null, // null | 'SCENARIO_A_CCTV_ALERT' | 'SCENARIO_B_ESCAPE_INTERVENTION' | ...
+  scenarioElapsedSec: 0,
+  scenarioSeed: 42
 };
+
+// IoT Network Communication Topology Definitions
+// Models the 4-layer communication hierarchy:
+// Layer 1: Sensors & Actuators <-> ESP32 Controllers (Simulated GPIO, Wiegand, I2C)
+// Layer 2: ESP32 Controllers <-> Wi-Fi Access Points (802.11n Wi-Fi, Simulated MQTT)
+// Layer 3: Wi-Fi Access Points <-> Shared Backend Service (Gigabit Facility VLAN 10)
+// Layer 4: Shared Backend Service <-> Central Security Control (Admin Portal) (Real WebSocket & HTTP REST)
+export const IOT_TOPOLOGY_METADATA = {
+  backend: {
+    id: 'BACKEND-CORE',
+    name: 'PrisonGuard Authoritative Backend Service',
+    location: 'Central Control Server Bay (Rack U4)',
+    ip: '192.168.10.2',
+    port: 5000,
+    status: 'ONLINE',
+    x: 1200,
+    y: 720,
+    transport: 'Node.js Express + Socket.IO v4 Engine',
+    uptimeSec: 86400
+  },
+  centralControl: {
+    id: 'SOC-CONSOLE-01',
+    name: 'Central Security Operations Console',
+    location: 'Central Security Control (SOC Room)',
+    ip: '192.168.10.100',
+    status: 'ONLINE',
+    x: 1140,
+    y: 720,
+    role: 'ADMINISTRATOR / OPERATOR',
+    transport: 'Vite React Web Application (SPA)'
+  }
+};
+

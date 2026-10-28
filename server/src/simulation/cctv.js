@@ -10,10 +10,17 @@ export const CAMERAS = {
     controllerId: 'ESP32-CAM-HUB',
     x: 680,
     y: 390,
-    angle: 45, // degrees: 0=East, 45=SE, 90=South, 180=West, 270=North
+    angle: 45, // current viewing angle (degrees: 0=East, 45=SE, 90=South, 180=West, 270=North)
+    defaultAngle: 45,
+    minAngle: 15,
+    maxAngle: 75,
     fov: 75,   // horizontal field of view in degrees
     distance: 260, // effective viewing range in map pixels
     status: 'ONLINE', // 'ONLINE' | 'OFFLINE' | 'DEGRADED'
+    isSweeping: false,
+    sweepDirection: 1, // 1 = clockwise, -1 = counter-clockwise
+    sweepSpeed: 3,     // degrees per tick
+    controlMode: 'STATIONARY', // 'STATIONARY' | 'SWEEP' | 'MANUAL'
     lastUpdated: new Date().toISOString()
   },
   'CAM-02': {
@@ -25,9 +32,16 @@ export const CAMERAS = {
     x: 800,
     y: 290,
     angle: 90,
+    defaultAngle: 90,
+    minAngle: 60,
+    maxAngle: 120,
     fov: 80,
     distance: 280,
     status: 'ONLINE',
+    isSweeping: false,
+    sweepDirection: 1,
+    sweepSpeed: 3,
+    controlMode: 'STATIONARY',
     lastUpdated: new Date().toISOString()
   },
   'CAM-03': {
@@ -39,9 +53,16 @@ export const CAMERAS = {
     x: 780,
     y: 730,
     angle: 90,
+    defaultAngle: 90,
+    minAngle: 45,
+    maxAngle: 135,
     fov: 75,
     distance: 220,
     status: 'ONLINE',
+    isSweeping: false,
+    sweepDirection: 1,
+    sweepSpeed: 3,
+    controlMode: 'STATIONARY',
     lastUpdated: new Date().toISOString()
   },
   'CAM-04': {
@@ -53,9 +74,16 @@ export const CAMERAS = {
     x: 1475,
     y: 450,
     angle: 270,
+    defaultAngle: 270,
+    minAngle: 230,
+    maxAngle: 310,
     fov: 65,
     distance: 340,
     status: 'ONLINE',
+    isSweeping: false,
+    sweepDirection: 1,
+    sweepSpeed: 2.5,
+    controlMode: 'STATIONARY',
     lastUpdated: new Date().toISOString()
   },
   'CAM-05': {
@@ -67,9 +95,16 @@ export const CAMERAS = {
     x: 100,
     y: 450,
     angle: 90,
+    defaultAngle: 90,
+    minAngle: 50,
+    maxAngle: 130,
     fov: 65,
     distance: 340,
     status: 'ONLINE',
+    isSweeping: false,
+    sweepDirection: 1,
+    sweepSpeed: 2.5,
+    controlMode: 'STATIONARY',
     lastUpdated: new Date().toISOString()
   },
   'CAM-06': {
@@ -81,9 +116,16 @@ export const CAMERAS = {
     x: 1040,
     y: 390,
     angle: 120,
+    defaultAngle: 120,
+    minAngle: 85,
+    maxAngle: 155,
     fov: 75,
     distance: 240,
     status: 'ONLINE',
+    isSweeping: false,
+    sweepDirection: 1,
+    sweepSpeed: 3,
+    controlMode: 'STATIONARY',
     lastUpdated: new Date().toISOString()
   },
   'CAM-07': {
@@ -95,9 +137,16 @@ export const CAMERAS = {
     x: 290,
     y: 390,
     angle: 45,
+    defaultAngle: 45,
+    minAngle: 15,
+    maxAngle: 85,
     fov: 80,
     distance: 240,
     status: 'ONLINE',
+    isSweeping: false,
+    sweepDirection: 1,
+    sweepSpeed: 3,
+    controlMode: 'STATIONARY',
     lastUpdated: new Date().toISOString()
   },
   'CAM-08': {
@@ -109,9 +158,16 @@ export const CAMERAS = {
     x: 1040,
     y: 660,
     angle: 45,
+    defaultAngle: 45,
+    minAngle: 15,
+    maxAngle: 75,
     fov: 75,
     distance: 220,
     status: 'ONLINE',
+    isSweeping: false,
+    sweepDirection: 1,
+    sweepSpeed: 2.5,
+    controlMode: 'STATIONARY',
     lastUpdated: new Date().toISOString()
   }
 };

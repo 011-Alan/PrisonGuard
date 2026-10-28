@@ -148,6 +148,28 @@ export class SimulationEngine {
 
     // Advance Facility Simulation Clock
     this.stepSimulationClock();
+    const simSpeed = this.state.simulationClock?.isPaused ? 0 : (this.state.simulationClock?.speed || 1);
+
+    // Advance automated scenarios driven strictly by simulation time
+    if (this.scenarios && simSpeed > 0) {
+      this.scenarios.tick(simSpeed);
+    }
+
+    // In-cell subtle movement for prisoners inside cells so they don't look frozen
+    if (this.tickCounter % 3 === 0 && simSpeed > 0) {
+      for (const [id, prisoner] of Object.entries(this.state.people)) {
+        if (prisoner.type === 'PRISONER' && prisoner.status === 'NORMAL' && (!prisoner.path || prisoner.path.length === 0)) {
+          if (prisoner.cellWaypoint && WAYPOINTS[prisoner.cellWaypoint]) {
+            const baseWp = WAYPOINTS[prisoner.cellWaypoint];
+            const numId = parseInt(id.replace(/\D/g, '') || '0', 10);
+            const jx = Math.sin((this.tickCounter + numId) * 0.7) * 4;
+            const jy = Math.cos((this.tickCounter + numId) * 0.7) * 4;
+            prisoner.x = Math.round(baseWp.x + jx);
+            prisoner.y = Math.round(baseWp.y + jy);
+          }
+        }
+      }
+    }
 
     // Autonomous staff & prisoner state machine checks
     this.processAutonomousStaffAndPrisoners(now);
@@ -172,6 +194,7 @@ export class SimulationEngine {
       lastUpdated: now,
       simulationClock: this.state.simulationClock,
       controllers: this.state.controllers,
+      accessPoints: this.state.accessPoints,
       people: this.state.people,
       gates: this.state.gates,
       doors: this.state.doors,
@@ -179,14 +202,37 @@ export class SimulationEngine {
       lockdown: this.state.lockdown,
       cameras: this.state.cameras,
       officerRadioRequests: this.state.officerRadioRequests,
-      officerTasks: this.state.officerTasks
+      officerTasks: this.state.officerTasks,
+      suspiciousActivities: this.state.suspiciousActivities,
+      externalVisitors: this.state.externalVisitors,
+      securityControlBreach: this.state.securityControlBreach
     });
   }
 
   updateCameraVisibility(now) {
     if (!this.state.cameras) return;
+    const speed = this.state.simulationClock?.isPaused ? 0 : (this.state.simulationClock?.speed || 1);
     const allEntities = Object.values(this.state.people || {});
+
     for (const cam of Object.values(this.state.cameras)) {
+      // If camera is in sweep mode, smoothly advance angle within min/max limits
+      if (cam.isSweeping && cam.status === 'ONLINE' && speed > 0) {
+        const step = (cam.sweepSpeed || 3) * (cam.sweepDirection || 1);
+        cam.angle += step;
+
+        const minA = cam.minAngle !== undefined ? cam.minAngle : 0;
+        const maxA = cam.maxAngle !== undefined ? cam.maxAngle : 360;
+
+        if (cam.angle >= maxA) {
+          cam.angle = maxA;
+          cam.sweepDirection = -1;
+        } else if (cam.angle <= minA) {
+          cam.angle = minA;
+          cam.sweepDirection = 1;
+        }
+        cam.angle = Math.round(cam.angle * 10) / 10;
+      }
+
       cam.visibleEntities = computeCameraVisibility(cam, allEntities, this.state.doors);
       cam.lastUpdated = now;
     }
@@ -365,8 +411,8 @@ export class SimulationEngine {
   }
 
   setSimulationClock({ speed, isPaused, time }) {
-    if (speed !== undefined) this.state.simulationClock.speed = speed;
-    if (isPaused !== undefined) this.state.simulationClock.isPaused = isPaused;
+    if (speed !== undefined) this.state.simulationClock.speed = Number(speed);
+    if (isPaused !== undefined) this.state.simulationClock.isPaused = Boolean(isPaused);
     if (time !== undefined) {
       this.state.simulationClock.time = new Date(time).toISOString();
     }
@@ -396,6 +442,17 @@ export class SimulationEngine {
   handleGateCommand(gateId, targetState, user = { username: 'OPERATOR', role: 'OPERATOR' }) {
     const gate = this.state.gates[gateId];
     if (!gate) throw new Error(`Gate ${gateId} not found`);
+
+    // Perimeter Gate Access Policy: Only an administrator can open external perimeter gates
+    if ((gateId === 'GATE-01' || gateId === 'GATE-02') && targetState === 'OPEN' && user?.role !== 'ADMIN') {
+      auditLogger.log({
+        type: 'ACCESS_DENIED',
+        user,
+        action: `Denied attempt to open perimeter gate ${gateId} without Administrator role`,
+        details: { gateId, targetState, requiredRole: 'ADMIN', userRole: user?.role }
+      });
+      throw new Error(`Cannot operate perimeter gate ${gateId}: Administrator role authorization required. Role '${user?.role || 'OPERATOR'}' denied.`);
+    }
 
     // Duplicate command protection
     if ((gate.state === 'OPENING' && targetState === 'OPEN') || (gate.state === 'CLOSING' && targetState === 'CLOSE')) {
@@ -1219,9 +1276,46 @@ export class SimulationEngine {
   }
 
   // --- Administrator-to-Officer Task Dispatch ---
-  dispatchOfficerTask({ officerId, commandType, targetWaypointId, note = '', priority = 'NORMAL', user = { username: 'ADMIN', role: 'ADMIN' } }) {
+  dispatchOfficerTask(arg1, arg2) {
+    let officerId, commandType, targetWaypointId, note = '', priority = 'NORMAL', user = { username: 'ADMIN', role: 'ADMIN' }, targetPersonId = null, targetDeviceId = null;
+
+    if (typeof arg1 === 'string') {
+      officerId = arg1;
+      const opts = arg2 || {};
+      commandType = opts.commandType || 'MOVE_TO';
+      targetWaypointId = opts.targetWaypointId;
+      note = opts.note || '';
+      priority = opts.priority || 'NORMAL';
+      if (opts.user) user = opts.user;
+      targetPersonId = opts.targetPersonId || null;
+      targetDeviceId = opts.targetDeviceId || null;
+    } else {
+      const opts = arg1 || {};
+      officerId = opts.officerId;
+      commandType = opts.commandType || 'MOVE_TO';
+      targetWaypointId = opts.targetWaypointId;
+      note = opts.note || '';
+      priority = opts.priority || 'NORMAL';
+      if (opts.user) user = opts.user;
+      targetPersonId = opts.targetPersonId || null;
+      targetDeviceId = opts.targetDeviceId || null;
+    }
+
     const officer = this.state.people[officerId];
     if (!officer) throw new Error(`Officer ${officerId} not found`);
+
+    // If targetWaypointId not explicitly set, try resolving from targetPersonId or targetDeviceId
+    if (!targetWaypointId && targetPersonId && this.state.people[targetPersonId]) {
+      const targetP = this.state.people[targetPersonId];
+      targetWaypointId = targetP.currentWaypoint || targetP.cellWaypoint || 'W_YARD_1';
+    }
+    if (!targetWaypointId && targetDeviceId && this.state.devices[targetDeviceId]) {
+      targetWaypointId = 'W_NORTH_A';
+    }
+    if (!targetWaypointId) {
+      targetWaypointId = officer.currentWaypoint || 'W_NORTH_A';
+    }
+
     if (!WAYPOINTS[targetWaypointId]) throw new Error(`Invalid destination waypoint: ${targetWaypointId}`);
 
     if (officer.officerState === 'MEDICAL_RECOVERY') {
@@ -1235,13 +1329,44 @@ export class SimulationEngine {
     const taskId = `TASK-${Date.now().toString(36).toUpperCase()}`;
     const destinationRoom = WAYPOINTS[targetWaypointId].room;
 
+    // Contextual radio acknowledgements based on commandType
+    let radioSpeech = `Received Central. Proceeding to ${destinationRoom}.`;
+    if (commandType === 'MONITOR_PRISONER') {
+      const targetName = targetPersonId && this.state.people[targetPersonId]?.name ? this.state.people[targetPersonId].name : 'assigned inmate';
+      radioSpeech = `Acknowledged Central. Monitoring ${targetName} at ${destinationRoom}.`;
+    } else if (commandType === 'INVESTIGATE_CAMERA') {
+      radioSpeech = `Camera alert received. Investigating sector at ${destinationRoom}.`;
+    } else if (commandType === 'INSPECT_CELL') {
+      radioSpeech = `Proceeding to inspect cell at ${destinationRoom}.`;
+    } else if (commandType === 'INSPECT_CORRIDOR') {
+      radioSpeech = `Received. Initiating corridor inspection at ${destinationRoom}.`;
+    } else if (commandType === 'PATROL_ZONE') {
+      radioSpeech = `Understood Central. Commencing patrol of ${destinationRoom}.`;
+    } else if (commandType === 'ESCORT_PRISONER') {
+      radioSpeech = `Received Central. Executing authorized escort detail.`;
+    } else if (commandType === 'VERIFY_VISITOR') {
+      radioSpeech = `En route to verify external visitor at checkpoint.`;
+    } else if (commandType === 'RESPOND_DOOR_ALARM') {
+      radioSpeech = `Responding immediately to door alarm at ${destinationRoom}!`;
+    } else if (commandType === 'INSPECT_SENSOR') {
+      radioSpeech = `Acknowledged. Inspecting sensor anomaly at ${destinationRoom}.`;
+    } else if (commandType === 'REPORT_MEDICAL') {
+      radioSpeech = `Received Central. Reporting directly to Medical Bay clinic.`;
+    } else if (commandType === 'RETURN_POST') {
+      radioSpeech = `Copy that Central. Returning to assigned duty post.`;
+    } else if (commandType === 'STATUS_REPORT') {
+      radioSpeech = `Station secure. Telemetry and beacon nominal.`;
+    }
+
     const task = {
       id: taskId,
       officerId: officer.id,
       officerName: officer.name,
-      commandType, // 'REPORT_TO' | 'GUARD_CELL' | 'PATROL_ZONE' | 'REPORT_MEDICAL' | 'INSPECT_GATE'
+      commandType,
       destinationRoom,
       targetWaypointId,
+      targetPersonId,
+      targetDeviceId,
       priority,
       note,
       dispatchedBy: user.username,
@@ -1252,12 +1377,13 @@ export class SimulationEngine {
     this.state.officerTasks.unshift(task);
 
     officer.officerState = 'RESPONDING_TO_ADMIN_COMMAND';
+    officer.availability = 'BUSY';
     officer.activity = `${commandType}: Heading to ${destinationRoom}`;
-    officer.currentAssignment = { type: 'ADMIN_TASK', taskId, targetWaypointId, destinationRoom };
+    officer.currentAssignment = { type: 'ADMIN_TASK', taskId, targetWaypointId, destinationRoom, commandType, targetPersonId };
 
     // Radio exchange acknowledgement
     officer.messageBubble = {
-      text: `Received: Proceeding to ${destinationRoom}`,
+      text: radioSpeech,
       expiresAt: Date.now() + 8000,
       type: 'DISPATCH'
     };
@@ -1275,7 +1401,7 @@ export class SimulationEngine {
     });
 
     this.addRecentActivity({
-      event: `Dispatch: ${officer.name} assigned to ${destinationRoom}`,
+      event: `Dispatch: ${officer.name} – ${commandType} at ${destinationRoom}`,
       location: destinationRoom,
       status: 'NORMAL',
       color: 'blue'
@@ -1284,6 +1410,292 @@ export class SimulationEngine {
     this.broadcastEvent('officer:task_created', task);
     this.broadcastState();
     return task;
+  }
+
+  // --- Camera Sweep & Manual Pan Operations ---
+  setCameraSweep(camId, action = 'TOGGLE', user = { username: 'ADMIN', role: 'ADMIN' }) {
+    const cam = this.state.cameras[camId];
+    if (!cam) throw new Error(`Camera ${camId} not found`);
+
+    if (action === 'START') {
+      cam.isSweeping = true;
+      cam.controlMode = 'SWEEP';
+    } else if (action === 'STOP') {
+      cam.isSweeping = false;
+      cam.controlMode = 'STATIONARY';
+    } else if (action === 'RESET') {
+      cam.isSweeping = false;
+      cam.angle = cam.defaultAngle || 45;
+      cam.controlMode = 'STATIONARY';
+    } else {
+      cam.isSweeping = !cam.isSweeping;
+      cam.controlMode = cam.isSweeping ? 'SWEEP' : 'STATIONARY';
+    }
+
+    this.updateCameraVisibility(new Date().toISOString());
+    this.broadcastEvent('camera:sweep', { camId, isSweeping: cam.isSweeping, angle: cam.angle, controlMode: cam.controlMode });
+    this.broadcastState();
+    return cam;
+  }
+
+  setCameraPan(camId, targetAngle, user = { username: 'ADMIN', role: 'ADMIN' }) {
+    const cam = this.state.cameras[camId];
+    if (!cam) throw new Error(`Camera ${camId} not found`);
+
+    const minA = cam.minAngle !== undefined ? cam.minAngle : 0;
+    const maxA = cam.maxAngle !== undefined ? cam.maxAngle : 360;
+    const clampedAngle = Math.max(minA, Math.min(maxA, Number(targetAngle)));
+
+    cam.angle = Math.round(clampedAngle * 10) / 10;
+    cam.isSweeping = false;
+    cam.controlMode = 'MANUAL';
+
+    this.updateCameraVisibility(new Date().toISOString());
+    this.broadcastEvent('camera:pan', { camId, angle: cam.angle, controlMode: cam.controlMode });
+    this.broadcastState();
+    return cam;
+  }
+
+  // --- Credential Revocation & Insider Threat Handling ---
+  revokeOfficerCredential(officerId, user = { username: 'ADMIN', role: 'ADMIN' }) {
+    const officer = this.state.people[officerId];
+    if (!officer) throw new Error(`Officer ${officerId} not found`);
+
+    officer.credentialStatus = 'REVOKED';
+    officer.availability = 'COMPROMISED';
+    officer.activity = 'Suspended from Duty – RFID Credential Revoked';
+    if (!this.revokedCards) this.revokedCards = new Set();
+    if (officer.rfidCardId) this.revokedCards.add(officer.rfidCardId);
+
+    auditLogger.log({
+      type: 'CREDENTIAL_REVOCATION',
+      user,
+      action: `Revoked RFID credential for ${officer.name} (${officer.id})`,
+      details: { officerId, cardId: officer.rfidCardId, previousStatus: 'ACTIVE', newStatus: 'REVOKED' }
+    });
+
+    this.addRecentActivity({
+      event: `RFID Revoked: ${officer.name} (${officer.badge}) – Access Disabled`,
+      location: officer.currentRoom,
+      status: 'CRITICAL',
+      color: 'red'
+    });
+
+    this.broadcastState();
+    return officer;
+  }
+
+  // --- External Visitor Workflow ---
+  triggerVisitorArrival({ visitorId = 'VIS-881', name = 'Detective Sarah Lin', category = 'INVESTIGATOR', organization = 'State Investigative Bureau', purpose = 'Formal Inspection & Inquiry', arrivalLocation = 'South Sally Port Outer Gate (Gate 2)' } = {}) {
+    const visitor = {
+      id: visitorId,
+      name,
+      category,
+      organization,
+      purpose,
+      location: arrivalLocation,
+      status: 'AWAITING_APPROVAL', // 'AWAITING_APPROVAL' | 'APPROVED' | 'DENIED' | 'IN_CONFERENCE' | 'DEPARTED'
+      arrivalTime: new Date().toISOString(),
+      escortOfficerId: null
+    };
+
+    const existingIdx = this.state.externalVisitors.findIndex(v => v.id === visitorId);
+    if (existingIdx >= 0) this.state.externalVisitors[existingIdx] = visitor;
+    else this.state.externalVisitors.unshift(visitor);
+
+    this.addRecentActivity({
+      event: `External Visitor Arrival: ${name} (${category}) at Gate 2`,
+      location: 'South Sally Port',
+      status: 'WARNING',
+      color: 'blue'
+    });
+
+    this.broadcastEvent('visitor:arrival', visitor);
+    this.broadcastState();
+    return visitor;
+  }
+
+  handleVisitorDecision(visitorId, decision, user = { username: 'ADMIN', role: 'ADMIN' }) {
+    const visitor = this.state.externalVisitors.find(v => v.id === visitorId);
+    if (!visitor) throw new Error(`Visitor ${visitorId} not found`);
+
+    if (user.role !== 'ADMIN') {
+      throw new Error('Only an administrator can authorize external visitor perimeter access');
+    }
+
+    if (decision === 'APPROVE') {
+      visitor.status = 'APPROVED';
+      visitor.authorizedBy = `${user.username} (${user.role})`;
+      visitor.escortOfficerId = 'OFC-118';
+
+      // Cycle Outer Sally Port Gate 2 to allow entry into inspection bay
+      this.handleGateCommand('GATE-02', 'OPEN', user);
+
+      // Dispatch Officer Kim to escort visitor
+      this.dispatchOfficerTask('OFC-118', {
+        commandType: 'ESCORT_PRISONER',
+        targetWaypointId: 'W_SALLY_BAY',
+        note: `Escort approved external investigator ${visitor.name} to Administration Conference Room.`
+      });
+
+      auditLogger.log({
+        type: 'VISITOR_AUTHORIZATION',
+        user,
+        action: `Approved external access for ${visitor.name} (${visitor.organization})`,
+        details: { visitorId, decision }
+      });
+
+      this.addRecentActivity({
+        event: `Visitor Access APPROVED: ${visitor.name} – Escort OFC-118 Assigned`,
+        location: 'South Sally Port',
+        status: 'NORMAL',
+        color: 'green'
+      });
+    } else {
+      visitor.status = 'DENIED';
+      visitor.authorizedBy = `${user.username} (${user.role})`;
+
+      auditLogger.log({
+        type: 'VISITOR_AUTHORIZATION',
+        user,
+        action: `DENIED external access for ${visitor.name}`,
+        details: { visitorId, decision }
+      });
+
+      this.addRecentActivity({
+        event: `Visitor Access DENIED: ${visitor.name}`,
+        location: 'South Sally Port',
+        status: 'CRITICAL',
+        color: 'red'
+      });
+    }
+
+    this.broadcastEvent('visitor:decision', visitor);
+    this.broadcastState();
+    return visitor;
+  }
+
+  // --- Suspicious Activity Engine ---
+  triggerSuspiciousActivity({ type = 'LOITERING_RESTRICTED_GATE', prisonerId = 'P-2089', location = 'Common Exercise Yard', detectionSource = 'CCTV_CAM_01', severity = 'HIGH' } = {}) {
+    const prisoner = this.state.people[prisonerId];
+    const activity = {
+      id: `SUSP-${Date.now().toString(36).toUpperCase()}`,
+      targetPrisonerId: prisonerId,
+      targetPrisonerName: prisoner?.name || 'Inmate',
+      location,
+      type,
+      severity,
+      detectionSource,
+      cameraCoverage: 'COVERED',
+      status: 'DETECTED', // 'DETECTED' | 'AWAITING_REVIEW' | 'OFFICER_ASSIGNED' | 'UNDER_OBSERVATION' | 'RESOLVED' | 'ESCALATED'
+      assignedOfficerId: null,
+      startTime: new Date().toISOString(),
+      resolvedAt: null,
+      cooldownRemainingSec: 0
+    };
+
+    this.state.suspiciousActivities.unshift(activity);
+    if (this.state.suspiciousActivities.length > 20) this.state.suspiciousActivities.pop();
+
+    if (prisoner) {
+      prisoner.activity = `Suspicious Activity: ${type.replace(/_/g, ' ')}`;
+    }
+
+    this.broadcastEvent('suspicious:new', activity);
+    this.broadcastState();
+    return activity;
+  }
+
+  // --- Health Model & Simulated Security Control Breach ---
+  applyHealthChange(personId, delta, reason = 'Scripted Simulation Event') {
+    const person = this.state.people[personId];
+    if (!person) throw new Error(`Person ${personId} not found`);
+
+    person.health = Math.max(0, Math.min(100, (person.health || 100) + delta));
+    if (person.health <= 0) {
+      person.healthState = 'INCAPACITATED';
+      person.activity = 'Incapacitated – Requires Medical Evacuation';
+      person.path = [];
+      if (person.type === 'OFFICER' || person.type === 'SUPERVISOR') {
+        person.availability = 'INCAPACITATED';
+      }
+    } else if (person.health < 40) {
+      person.healthState = 'INJURED';
+      person.activity = 'Injured – Seeking Medical Assistance';
+    } else if (person.health < 100) {
+      person.healthState = 'RECOVERING';
+    } else {
+      person.healthState = 'HEALTHY';
+    }
+
+    // If supervisor character SUP-309 became incapacitated -> trigger Security Control Breach
+    if (personId === 'SUP-309' && person.health <= 0) {
+      this.triggerSecurityControlBreach();
+    }
+
+    this.addRecentActivity({
+      event: `Health Update: ${person.name} (${person.health} HP) – ${reason}`,
+      location: person.currentRoom,
+      status: person.health < 40 ? 'CRITICAL' : 'NORMAL',
+      color: person.health < 40 ? 'red' : 'blue'
+    });
+
+    this.broadcastEvent('person:health', { personId, health: person.health, healthState: person.healthState, reason });
+    this.broadcastState();
+    return person;
+  }
+
+  triggerSecurityControlBreach() {
+    this.state.securityControlBreach = {
+      isBreached: true,
+      incapacitatedOfficerId: 'SUP-309',
+      title: 'SIMULATED SECURITY CONTROL BREACH',
+      message: 'In-world SOC Supervisor Sgt. Cole incapacitated! Local console offline. Authenticated web user operational.',
+      affectedControls: ['LOCAL_CONSOLE_LOCK', 'INTERNAL_STROBE_OVERRIDE'],
+      severity: 'CRITICAL',
+      activatedAt: new Date().toISOString()
+    };
+
+    this.addRecentActivity({
+      event: 'ALERT: SIMULATED SECURITY CONTROL BREACH ACTIVATED',
+      location: 'Central Security Control',
+      status: 'CRITICAL',
+      color: 'red'
+    });
+
+    this.broadcastEvent('security:breach', this.state.securityControlBreach);
+    this.broadcastState();
+  }
+
+  resetSecurityControlBreach() {
+    const supervisor = this.state.people['SUP-309'];
+    if (supervisor) {
+      supervisor.health = 100;
+      supervisor.healthState = 'HEALTHY';
+      supervisor.activity = 'SOC Monitoring & Command';
+      supervisor.status = 'NORMAL';
+      supervisor.availability = 'AVAILABLE';
+    }
+
+    this.state.securityControlBreach = {
+      isBreached: false,
+      incapacitatedOfficerId: null,
+      title: '',
+      message: '',
+      affectedControls: [],
+      severity: 'NORMAL',
+      activatedAt: null
+    };
+
+    this.addRecentActivity({
+      event: 'Security Control Restored: SOC Console Operational',
+      location: 'Central Security Control',
+      status: 'NORMAL',
+      color: 'green'
+    });
+
+    this.broadcastEvent('security:breach_reset', this.state.securityControlBreach);
+    this.broadcastState();
   }
 
   // --- Officer Incapacitation & Medical Recovery Workflow ---
@@ -1499,12 +1911,29 @@ export class SimulationEngine {
     let personName = 'Unknown Person';
     let role = 'UNKNOWN';
 
-    if (person && person.type === 'OFFICER') {
-      result = 'GRANTED';
-      reason = 'Valid Officer Security Credential';
+    // Check if card has been explicitly revoked
+    if (this.revokedCards && this.revokedCards.has(cardId)) {
+      result = 'DENIED';
+      reason = 'RFID Credential REVOKED by Security Administrator';
+      if (person) {
+        personName = person.name;
+        role = person.type;
+      }
+    } else if (person) {
       personName = person.name;
-      role = 'OFFICER';
-      this.rules.recordAuthScan(readerId, cardId, person.id);
+      role = person.type;
+
+      if (person.credentialStatus === 'REVOKED' || person.credentialStatus === 'SUSPENDED') {
+        result = 'DENIED';
+        reason = `RFID Credential ${person.credentialStatus} by Security Administrator`;
+      } else if (person.type === 'OFFICER' || person.type === 'SUPERVISOR') {
+        result = 'GRANTED';
+        reason = 'Valid Officer Security Credential';
+        this.rules.recordAuthScan(readerId, cardId, person.id);
+      } else if (person.type === 'PRISONER') {
+        result = 'DENIED';
+        reason = 'Illicit Inmate Token Presentation – Access Prohibited';
+      }
     } else if (cardId && cardId.startsWith('CARD-OFC')) {
       result = 'GRANTED';
       reason = 'Verified Officer Badge';
@@ -1673,11 +2102,34 @@ export class SimulationEngine {
           if (person.routeHistory.length > 30) person.routeHistory.pop();
 
           if (person.path.length === 0) {
-            person.status = 'NORMAL';
+            if (person.status !== 'ESCAPING' && person.status !== 'DETAINED' && person.status !== 'ESCAPED' && person.officerState !== 'INTERCEPTING' && person.officerState !== 'ESCORTING') {
+              person.status = 'NORMAL';
+            }
             person.targetWaypoint = null;
           }
           movedAny = true;
         }
+      }
+    }
+
+    // Crowd separation repulsion: offset people occupying the same waypoint to prevent full visual overlap
+    const waypointOccupants = {};
+    for (const person of Object.values(this.state.people)) {
+      if (person.currentWaypoint) {
+        if (!waypointOccupants[person.currentWaypoint]) waypointOccupants[person.currentWaypoint] = [];
+        waypointOccupants[person.currentWaypoint].push(person);
+      }
+    }
+    for (const [wpId, list] of Object.entries(waypointOccupants)) {
+      if (list.length > 1) {
+        const base = WAYPOINTS[wpId];
+        list.forEach((p, index) => {
+          if (base && (!p.path || p.path.length === 0)) {
+            const angle = (index * (2 * Math.PI / list.length));
+            p.x = Math.round(base.x + Math.cos(angle) * 12);
+            p.y = Math.round(base.y + Math.sin(angle) * 12);
+          }
+        });
       }
     }
 

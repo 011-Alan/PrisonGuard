@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { Video, VideoOff, Eye, ShieldAlert, Cpu, Radio, AlertTriangle, Maximize2, X, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { Video, VideoOff, Eye, ShieldAlert, Cpu, Radio, AlertTriangle, Maximize2, X, RefreshCw, CheckCircle2, RotateCw, Compass } from 'lucide-react';
 import { useSocket } from '../context/SocketContext';
 import { SIMULATOR_URL } from '../config';
 
 export default function CctvMonitoring() {
-  const { state, toggleCamera } = useSocket();
+  const { state, toggleCamera, sweepCamera, panCamera } = useSocket();
   const [selectedCam, setSelectedCam] = useState(null);
   const [filterZone, setFilterZone] = useState('ALL');
 
@@ -85,6 +85,22 @@ export default function CctvMonitoring() {
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      sweepCamera(cam.id, 'TOGGLE');
+                    }}
+                    title={cam.isSweeping ? "Stop Continuous Sweep" : "Start Continuous Sweep"}
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded transition flex items-center gap-1 ${
+                      cam.isSweeping
+                        ? 'bg-cyan-950 text-cyan-300 border border-cyan-500/40'
+                        : 'bg-slate-800 text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    <RotateCw className={`w-2.5 h-2.5 ${cam.isSweeping ? 'animate-spin' : ''}`} />
+                    <span>{cam.isSweeping ? 'Sweep ON' : 'Sweep OFF'}</span>
+                  </button>
+
                   <button
                     onClick={(e) => handleToggleStatus(e, cam)}
                     title={isOnline ? "Simulate Camera Signal Loss (Set Offline)" : "Restore Camera Power (Set Online)"}
@@ -224,117 +240,173 @@ export default function CctvMonitoring() {
       </div>
 
       {/* Expanded Modal View for Selected Camera */}
-      {selectedCam && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-[#0f172a] border border-cyan-500/50 rounded-2xl w-full max-w-4xl p-6 shadow-2xl animate-in zoom-in-95 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-borderMuted">
-              <div className="flex items-center gap-3">
-                <Video className="w-6 h-6 text-cyan-400" />
-                <div>
-                  <h3 className="font-bold text-white text-base">{selectedCam.name}</h3>
-                  <div className="flex items-center gap-2 text-xs font-mono text-gray-400">
-                    <span>ID: {selectedCam.id}</span>
-                    <span>•</span>
-                    <span>Zone: {selectedCam.zone}</span>
-                    <span>•</span>
-                    <span className={selectedCam.status === 'ONLINE' ? 'text-emerald-400' : 'text-red-400'}>
-                      {selectedCam.status}
+      {selectedCam && (() => {
+        const liveCam = cameras.find(c => c.id === selectedCam.id) || selectedCam;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+            <div className="bg-[#0f172a] border border-cyan-500/50 rounded-2xl w-full max-w-4xl p-6 shadow-2xl animate-in zoom-in-95 space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-borderMuted">
+                <div className="flex items-center gap-3">
+                  <Video className="w-6 h-6 text-cyan-400" />
+                  <div>
+                    <h3 className="font-bold text-white text-base">{liveCam.name}</h3>
+                    <div className="flex items-center gap-2 text-xs font-mono text-gray-400">
+                      <span>ID: {liveCam.id}</span>
+                      <span>•</span>
+                      <span>Zone: {liveCam.zone}</span>
+                      <span>•</span>
+                      <span className={liveCam.status === 'ONLINE' ? 'text-emerald-400' : 'text-red-400'}>
+                        {liveCam.status}
+                      </span>
+                      <span>•</span>
+                      <span className="text-cyan-400">{liveCam.isSweeping ? 'MODE: AUTO_SWEEP (ACTIVE)' : 'MODE: FIXED / MANUAL'}</span>
+                    </div>
+                  </div>
+                </div>
+                <button onClick={() => setSelectedCam(null)} className="text-gray-400 hover:text-white p-1 rounded hover:bg-slate-800">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* PTZ Pan & Sweep Controls (Section 16) */}
+              <div className="p-3 bg-[#090d16] rounded-xl border border-cyan-500/30 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-3">
+                  <Compass className="w-5 h-5 text-cyan-400" />
+                  <div>
+                    <span className="font-bold text-white block">PTZ Bearing & Sweep Controls</span>
+                    <span className="text-gray-400 text-[11px] font-mono">
+                      Bearing: <strong className="text-cyan-300">{Math.round(liveCam.angle)}°</strong> (Bounds: {liveCam.minAngle}° - {liveCam.maxAngle}°)
                     </span>
                   </div>
                 </div>
-              </div>
-              <button onClick={() => setSelectedCam(null)} className="text-gray-400 hover:text-white p-1 rounded hover:bg-slate-800">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
 
-            {/* Expanded Screen Feed */}
-            <div className="relative h-96 bg-[#060a12] rounded-xl border border-slate-800 overflow-hidden flex items-center justify-center">
-              {selectedCam.status === 'ONLINE' ? (
-                <svg viewBox="-200 0 400 320" className="w-full h-full">
-                  <polygon points="-60,20 60,20 180,300 -180,300" fill="#0a1528" stroke="#334155" strokeWidth="1.5" />
-                  <line x1="-90" y1="100" x2="90" y2="100" stroke="#1e293b" strokeWidth="1" strokeDasharray="4,4" />
-                  <line x1="-130" y1="180" x2="130" y2="180" stroke="#1e293b" strokeWidth="1" strokeDasharray="4,4" />
-                  <line x1="-170" y1="250" x2="170" y2="250" stroke="#1e293b" strokeWidth="1" strokeDasharray="4,4" />
-                  <circle cx="0" cy="20" r="10" fill="#090d16" stroke="#38bdf8" strokeWidth="2" />
-                  <circle cx="0" cy="20" r="3.5" fill="#38bdf8" />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => sweepCamera(liveCam.id, 'TOGGLE')}
+                    className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 ${
+                      liveCam.isSweeping
+                        ? 'bg-cyan-600 text-white shadow-md'
+                        : 'bg-slate-800 text-gray-300 hover:text-white'
+                    }`}
+                  >
+                    <RotateCw className={`w-3.5 h-3.5 ${liveCam.isSweeping ? 'animate-spin' : ''}`} />
+                    <span>{liveCam.isSweeping ? 'Stop Sweep' : 'Start Auto Sweep'}</span>
+                  </button>
 
-                  {selectedCam.visibleEntities?.map((ent, idx) => {
-                    const px = Math.max(-150, Math.min(150, ent.relativeX * 0.8));
-                    const py = Math.max(50, Math.min(280, 40 + ent.distance * 0.8));
-                    const isOfficer = ent.category === 'OFFICER';
-                    const color = isOfficer ? '#3b82f6' : '#f59e0b';
-                    return (
-                      <g key={idx}>
-                        <ellipse cx={px} cy={py + 8} rx="16" ry="6" fill="none" stroke={color} strokeWidth="1.2" opacity="0.6" />
-                        <circle cx={px} cy={py} r="9" fill={color} stroke="#ffffff" strokeWidth="2" />
-                        <text x={px} y={py + 3} fill="#ffffff" fontSize="8" fontWeight="bold" textAnchor="middle">
-                          {isOfficer ? 'G' : 'P'}
-                        </text>
-                        <rect x={px - 36} y={py - 20} width="72" height="14" rx="3" fill="#090d16" stroke={color} strokeWidth="1" />
-                        <text x={px} y={py - 10} fill="#ffffff" fontSize="7" fontWeight="bold" textAnchor="middle">
-                          {ent.name} ({ent.distance}px)
-                        </text>
-                      </g>
-                    );
-                  })}
-                </svg>
-              ) : (
-                <div className="text-center space-y-2">
-                  <VideoOff className="w-12 h-12 text-red-500 mx-auto animate-pulse" />
-                  <p className="font-mono text-sm font-bold text-red-400">CAMERA OFFLINE</p>
-                </div>
-              )}
-
-              {/* OSD Bar */}
-              <div className="absolute top-3 left-3 bg-black/70 px-2 py-1 rounded font-mono text-xs text-red-400 font-bold">
-                ● LIVE REC • {selectedCam.id}
-              </div>
-              <div className="absolute top-3 right-3 bg-black/70 px-2 py-1 rounded font-mono text-xs text-gray-300">
-                {currentTime}
-              </div>
-              <div className="absolute bottom-3 left-3 bg-black/80 px-2 py-1 rounded text-xs text-cyan-300 font-mono">
-                SIMULATED CCTV PERCEPTION — LINE-OF-SIGHT VERIFIED
-              </div>
-            </div>
-
-            {/* Telemetry & Detected Personnel Table */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-              <div className="p-4 bg-[#090d16] rounded-xl border border-borderMuted space-y-2">
-                <span className="text-[10px] uppercase font-bold text-gray-400 block tracking-wider">Camera Hardware Specifications</span>
-                <div className="grid grid-cols-2 gap-2 text-gray-300 font-mono">
-                  <div>Controller: <strong className="text-white">{selectedCam.controllerId}</strong></div>
-                  <div>Map Origin: <strong className="text-white">X:{selectedCam.x}, Y:{selectedCam.y}</strong></div>
-                  <div>Mount Bearing: <strong className="text-white">{selectedCam.angle}°</strong></div>
-                  <div>Viewing Arc: <strong className="text-white">{selectedCam.fov}° Horizontal</strong></div>
-                  <div>Max Optical Depth: <strong className="text-white">{selectedCam.distance}px</strong></div>
-                  <div>Perception Engine: <strong className="text-cyan-400">2D Raycast Occlusion</strong></div>
+                  <div className="flex items-center gap-1 border-l border-slate-700 pl-2">
+                    <button
+                      onClick={() => panCamera(liveCam.id, (liveCam.angle || 0) - 15)}
+                      className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-mono font-bold"
+                      title="Pan Left -15°"
+                    >
+                      ⮜ -15°
+                    </button>
+                    <button
+                      onClick={() => panCamera(liveCam.id, liveCam.defaultAngle ?? 0)}
+                      className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-400 rounded-lg font-mono text-[10px]"
+                      title="Reset to Center Angle"
+                    >
+                      Center
+                    </button>
+                    <button
+                      onClick={() => panCamera(liveCam.id, (liveCam.angle || 0) + 15)}
+                      className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-mono font-bold"
+                      title="Pan Right +15°"
+                    >
+                      +15° ⮞
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              <div className="p-4 bg-[#090d16] rounded-xl border border-borderMuted space-y-2">
-                <span className="text-[10px] uppercase font-bold text-gray-400 block tracking-wider">
-                  Observed Ground-Truth Entities ({selectedCam.visibleEntities?.length || 0})
-                </span>
-                {selectedCam.visibleEntities?.length > 0 ? (
-                  <ul className="space-y-1.5 max-h-32 overflow-y-auto">
-                    {selectedCam.visibleEntities.map((ent, idx) => (
-                      <li key={idx} className="flex items-center justify-between p-1.5 rounded bg-slate-900 border border-slate-800 text-gray-200">
-                        <span className="font-bold">{ent.name}</span>
-                        <span className="font-mono text-gray-400 text-[10px]">
-                          Distance: {ent.distance}px • Bearing: {ent.bearing}°
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
+              {/* Expanded Screen Feed */}
+              <div className="relative h-80 bg-[#060a12] rounded-xl border border-slate-800 overflow-hidden flex items-center justify-center">
+                {liveCam.status === 'ONLINE' ? (
+                  <svg viewBox="-200 0 400 320" className="w-full h-full">
+                    <polygon points="-60,20 60,20 180,300 -180,300" fill="#0a1528" stroke="#334155" strokeWidth="1.5" />
+                    <line x1="-90" y1="100" x2="90" y2="100" stroke="#1e293b" strokeWidth="1" strokeDasharray="4,4" />
+                    <line x1="-130" y1="180" x2="130" y2="180" stroke="#1e293b" strokeWidth="1" strokeDasharray="4,4" />
+                    <line x1="-170" y1="250" x2="170" y2="250" stroke="#1e293b" strokeWidth="1" strokeDasharray="4,4" />
+                    <circle cx="0" cy="20" r="10" fill="#090d16" stroke="#38bdf8" strokeWidth="2" />
+                    <circle cx="0" cy="20" r="3.5" fill="#38bdf8" />
+
+                    {liveCam.visibleEntities?.map((ent, idx) => {
+                      const px = Math.max(-150, Math.min(150, ent.relativeX * 0.8));
+                      const py = Math.max(50, Math.min(280, 40 + ent.distance * 0.8));
+                      const isOfficer = ent.category === 'OFFICER';
+                      const color = isOfficer ? '#3b82f6' : '#f59e0b';
+                      return (
+                        <g key={idx}>
+                          <ellipse cx={px} cy={py + 8} rx="16" ry="6" fill="none" stroke={color} strokeWidth="1.2" opacity="0.6" />
+                          <circle cx={px} cy={py} r="9" fill={color} stroke="#ffffff" strokeWidth="2" />
+                          <text x={px} y={py + 3} fill="#ffffff" fontSize="8" fontWeight="bold" textAnchor="middle">
+                            {isOfficer ? 'G' : 'P'}
+                          </text>
+                          <rect x={px - 36} y={py - 20} width="72" height="14" rx="3" fill="#090d16" stroke={color} strokeWidth="1" />
+                          <text x={px} y={py - 10} fill="#ffffff" fontSize="7" fontWeight="bold" textAnchor="middle">
+                            {ent.name} ({ent.distance}px)
+                          </text>
+                        </g>
+                      );
+                    })}
+                  </svg>
                 ) : (
-                  <p className="text-gray-500 italic text-xs">No personnel currently inside camera field of view.</p>
+                  <div className="text-center space-y-2">
+                    <VideoOff className="w-12 h-12 text-red-500 mx-auto animate-pulse" />
+                    <p className="font-mono text-sm font-bold text-red-400">CAMERA OFFLINE</p>
+                  </div>
                 )}
+
+                {/* OSD Bar */}
+                <div className="absolute top-3 left-3 bg-black/70 px-2 py-1 rounded font-mono text-xs text-red-400 font-bold">
+                  ● LIVE REC • {liveCam.id}
+                </div>
+                <div className="absolute top-3 right-3 bg-black/70 px-2 py-1 rounded font-mono text-xs text-gray-300">
+                  {currentTime}
+                </div>
+                <div className="absolute bottom-3 left-3 bg-black/80 px-2 py-1 rounded text-xs text-cyan-300 font-mono">
+                  SIMULATED CCTV PERCEPTION — LINE-OF-SIGHT VERIFIED
+                </div>
+              </div>
+
+              {/* Telemetry & Detected Personnel Table */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                <div className="p-4 bg-[#090d16] rounded-xl border border-borderMuted space-y-2">
+                  <span className="text-[10px] uppercase font-bold text-gray-400 block tracking-wider">Camera Hardware Specifications</span>
+                  <div className="grid grid-cols-2 gap-2 text-gray-300 font-mono">
+                    <div>Controller: <strong className="text-white">{liveCam.controllerId}</strong></div>
+                    <div>Map Origin: <strong className="text-white">X:{liveCam.x}, Y:{liveCam.y}</strong></div>
+                    <div>Mount Bearing: <strong className="text-white">{Math.round(liveCam.angle)}°</strong></div>
+                    <div>Viewing Arc: <strong className="text-white">{liveCam.fov}° Horizontal</strong></div>
+                    <div>Max Optical Depth: <strong className="text-white">{liveCam.distance}px</strong></div>
+                    <div>Perception Engine: <strong className="text-cyan-400">2D Raycast Occlusion</strong></div>
+                  </div>
+                </div>
+
+                <div className="p-4 bg-[#090d16] rounded-xl border border-borderMuted space-y-2">
+                  <span className="text-[10px] uppercase font-bold text-gray-400 block tracking-wider">
+                    Observed Ground-Truth Entities ({liveCam.visibleEntities?.length || 0})
+                  </span>
+                  {liveCam.visibleEntities?.length > 0 ? (
+                    <ul className="space-y-1.5 max-h-32 overflow-y-auto">
+                      {liveCam.visibleEntities.map((ent, idx) => (
+                        <li key={idx} className="flex items-center justify-between p-1.5 rounded bg-slate-900 border border-slate-800 text-gray-200">
+                          <span className="font-bold">{ent.name}</span>
+                          <span className="font-mono text-gray-400 text-[10px]">
+                            Distance: {ent.distance}px • Bearing: {ent.bearing}°
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-gray-500 italic text-xs">No personnel currently inside camera field of view.</p>
+                  )}
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

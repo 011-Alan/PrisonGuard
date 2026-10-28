@@ -70,8 +70,12 @@ export function SocketProvider({ children }) {
           speakers: tickData.speakers || prev.speakers,
           lockdown: tickData.lockdown || prev.lockdown,
           cameras: tickData.cameras || prev.cameras,
+          accessPoints: tickData.accessPoints || prev.accessPoints,
           officerRadioRequests: tickData.officerRadioRequests || prev.officerRadioRequests,
-          officerTasks: tickData.officerTasks || prev.officerTasks
+          officerTasks: tickData.officerTasks || prev.officerTasks,
+          suspiciousActivities: tickData.suspiciousActivities || prev.suspiciousActivities,
+          externalVisitors: tickData.externalVisitors || prev.externalVisitors,
+          securityControlBreach: tickData.securityControlBreach || prev.securityControlBreach
         };
       });
     });
@@ -308,6 +312,71 @@ export function SocketProvider({ children }) {
     });
   };
 
+  const sweepCamera = async (cameraId, action = 'TOGGLE') => {
+    return authFetch(`/api/cameras/${cameraId}/sweep`, {
+      method: 'POST',
+      body: JSON.stringify({ action })
+    });
+  };
+
+  const panCamera = async (cameraId, angle) => {
+    return authFetch(`/api/cameras/${cameraId}/pan`, {
+      method: 'POST',
+      body: JSON.stringify({ angle })
+    });
+  };
+
+  const revokeOfficerCredential = async (officerId) => {
+    return authFetch(`/api/officers/${officerId}/revoke-credential`, {
+      method: 'POST'
+    });
+  };
+
+  const handleVisitorDecision = async (visitorId, decision) => {
+    return authFetch(`/api/visitors/${visitorId}/decision`, {
+      method: 'POST',
+      body: JSON.stringify({ decision })
+    });
+  };
+
+  const triggerSuspiciousActivity = async (data) => {
+    return authFetch('/api/suspicious/trigger', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  };
+
+  const applyHealthChange = async (personId, delta, reason) => {
+    return authFetch('/api/health/change', {
+      method: 'POST',
+      body: JSON.stringify({ personId, delta, reason })
+    });
+  };
+
+  const triggerSecurityBreach = async () => {
+    return authFetch('/api/security/breach', {
+      method: 'POST'
+    });
+  };
+
+  const resetSecurityControlBreach = async () => {
+    return authFetch('/api/security/breach/reset', {
+      method: 'POST'
+    });
+  };
+
+  const pauseScenario = async () => {
+    return authFetch('/api/scenarios/pause', {
+      method: 'POST'
+    });
+  };
+
+  const resumeScenario = async () => {
+    return authFetch('/api/scenarios/resume', {
+      method: 'POST'
+    });
+  };
+
   return (
     <SocketContext.Provider
       value={{
@@ -336,11 +405,21 @@ export function SocketProvider({ children }) {
         controlClock,
         startScenario,
         stopScenario,
+        pauseScenario,
+        resumeScenario,
         resetSimulation,
         toggleCamera,
+        sweepCamera,
+        panCamera,
         respondToRadioRequest,
         dispatchOfficerTask,
         triggerOfficerMedical,
+        revokeOfficerCredential,
+        handleVisitorDecision,
+        triggerSuspiciousActivity,
+        applyHealthChange,
+        triggerSecurityBreach,
+        resetSecurityControlBreach,
         startControlledEscape,
         startMassEscape
       }}

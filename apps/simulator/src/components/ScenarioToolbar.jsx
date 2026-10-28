@@ -10,7 +10,8 @@ import {
   EyeOff,
   Cpu,
   Layers,
-  ChevronDown
+  ChevronDown,
+  Sliders
 } from 'lucide-react';
 import { useSocket } from '../context/SocketContext';
 
@@ -20,23 +21,30 @@ export default function ScenarioToolbar({
   onZoomOut,
   onResetView,
   showIoTOverlay,
-  onToggleIoTOverlay
+  onToggleIoTOverlay,
+  onOpenDisplaySettings
 }) {
   const { state, startScenario, stopScenario, resetSimulation } = useSocket();
-  const [selectedScenario, setSelectedScenario] = useState('PERIMETER_ESCAPE');
+  const [selectedScenario, setSelectedScenario] = useState('SCENARIO_B');
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
   const activeScenario = state?.activeScenario;
 
   const scenarios = [
-    { id: 'OFFICER_ENTRY', label: '1. Authorized Officer Entry & Gate Check' },
-    { id: 'UNAUTHORIZED_ACCESS', label: '2. Unauthorized Access Token Scan' },
-    { id: 'DOOR_BREACH', label: '3. Unexpected Cell Door Opening' },
-    { id: 'PERIMETER_ESCAPE', label: '4. Perimeter Disturbance & Escape Attempt' },
-    { id: 'GATE_FAILURE', label: '5. Gate Actuator Failure (Motor Jam)' },
-    { id: 'CONTROLLER_DISCONNECT', label: '6. ESP32 Controller Loss (Cascading Failure)' },
-    { id: 'MEDICAL_DURESS', label: '7. Medical Assistance Duress Trigger' },
-    { id: 'SECURITY_INCIDENT_RESPONSE', label: '8. Security Breach & Officer Dispatch' }
+    { id: 'SCENARIO_A', category: 'Live Demonstration Scenarios', label: 'Scenario A: CCTV Alert & Officer Monitoring' },
+    { id: 'SCENARIO_B', category: 'Live Demonstration Scenarios', label: 'Scenario B: Inmate Escape Attempt (Contained vs Uncontained)' },
+    { id: 'SCENARIO_C', category: 'Live Demonstration Scenarios', label: 'Scenario C: Power Failure & Emergency Lockdown' },
+    { id: 'SCENARIO_D', category: 'Live Demonstration Scenarios', label: 'Scenario D: Compromised Officer & RFID Revocation' },
+    { id: 'SCENARIO_E', category: 'Live Demonstration Scenarios', label: 'Scenario E: Credential Misuse & Inmate Containment' },
+    { id: 'SCENARIO_F', category: 'Live Demonstration Scenarios', label: 'Scenario F: External Visitor Arrival & Escort' },
+    { id: 'OFFICER_ENTRY', category: 'Facility Operations', label: 'Authorized Officer Entry & Sally Port Check' },
+    { id: 'UNAUTHORIZED_ACCESS', category: 'Facility Operations', label: 'Unauthorized Token Scan at Sally Port' },
+    { id: 'DOOR_BREACH', category: 'Facility Operations', label: 'Cell Door Forced Breach Alert' },
+    { id: 'PERIMETER_ESCAPE', category: 'Facility Operations', label: 'Perimeter Sensor Breach Attempt' },
+    { id: 'GATE_FAILURE', category: 'Facility Operations', label: 'Gate Actuator Jam / Motor Stalling' },
+    { id: 'CONTROLLER_DISCONNECT', category: 'Facility Operations', label: 'ESP32 Controller Heartbeat Dropout' },
+    { id: 'MEDICAL_DURESS', category: 'Facility Operations', label: 'Medical Ward Duress Alarm' },
+    { id: 'SECURITY_INCIDENT_RESPONSE', category: 'Facility Operations', label: 'Coordinated Tactical Breach Intercept' }
   ];
 
   const handleStartScenario = () => {
@@ -72,11 +80,31 @@ export default function ScenarioToolbar({
         </button>
 
         {dropdownOpen && (
-          <div className="absolute left-0 mt-2 w-72 bg-[#111827] border border-borderSubtle rounded-xl shadow-2xl py-1 z-50 animate-in fade-in zoom-in-95">
-            <div className="px-3 py-1.5 text-[10px] uppercase font-bold text-gray-400 tracking-wider border-b border-slate-800">
+          <div className="absolute left-0 mt-2 w-80 bg-[#111827] border border-cyan-500/30 rounded-xl shadow-2xl py-1 z-50 animate-in fade-in zoom-in-95 max-h-96 overflow-y-auto">
+            <div className="px-3 py-1.5 text-[10px] uppercase font-bold text-cyan-400 tracking-wider border-b border-slate-800 bg-cyan-950/30">
+              Live Demonstration Scenarios (A - F)
+            </div>
+            {scenarios.filter(s => s.category === 'Live Demonstration Scenarios').map(sc => (
+              <button
+                key={sc.id}
+                onClick={() => {
+                  setSelectedScenario(sc.id);
+                  setDropdownOpen(false);
+                }}
+                className={`w-full text-left px-3 py-2 text-xs transition ${
+                  selectedScenario === sc.id
+                    ? 'bg-cyan-950/60 text-cyan-300 font-bold border-l-2 border-cyan-400'
+                    : 'text-gray-300 hover:bg-slate-800 hover:text-white'
+                }`}
+              >
+                {sc.label}
+              </button>
+            ))}
+
+            <div className="px-3 py-1.5 text-[10px] uppercase font-bold text-gray-400 tracking-wider border-b border-t border-slate-800 bg-slate-900/60 mt-1">
               Deterministic Automated Scenarios
             </div>
-            {scenarios.map(sc => (
+            {scenarios.filter(s => s.category !== 'Live Demonstration Scenarios').map(sc => (
               <button
                 key={sc.id}
                 onClick={() => {
@@ -122,6 +150,18 @@ export default function ScenarioToolbar({
           title="Reset Simulation State"
         >
           <RotateCcw className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Display Options Settings (Section 23) */}
+      <div className="pr-3 border-r border-slate-700">
+        <button
+          onClick={onOpenDisplaySettings}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold bg-slate-800 hover:bg-slate-700 text-gray-300 hover:text-white border border-slate-700 transition"
+          title="Toggle Simulation Display Options"
+        >
+          <Sliders className="w-3.5 h-3.5 text-cyan-400" />
+          <span>Display Options</span>
         </button>
       </div>
 

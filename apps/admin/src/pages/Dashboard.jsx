@@ -45,7 +45,10 @@ export default function Dashboard({ onNavigateTab }) {
     respondToRadioRequest,
     dispatchOfficerTask,
     startControlledEscape,
-    startMassEscape
+    startMassEscape,
+    startScenario,
+    handleVisitorDecision,
+    resetSecurityControlBreach
   } = useSocket();
   const [selectedGate, setSelectedGate] = useState(null);
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', action: null, isDanger: true });
@@ -285,6 +288,153 @@ export default function Dashboard({ onNavigateTab }) {
         <div className="flex items-center gap-2 text-[11px] text-gray-400 font-mono">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
           <span>SESSION: ACTIVE (JWT TOKEN VALIDATED)</span>
+        </div>
+      </div>
+
+      {/* Security Control Breach Banner & Reset (Section 22) */}
+      {state?.securityControlBreach?.isBreached && (
+        <div className="p-4 bg-gradient-to-r from-red-950 via-red-900 to-red-950 border-2 border-red-500 rounded-2xl flex flex-wrap items-center justify-between gap-4 shadow-2xl animate-pulse">
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-red-600 rounded-xl text-white">
+              <AlertOctagon className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-extrabold text-white text-sm uppercase tracking-wider">
+                  ⚠️ CRITICAL INCIDENT: CENTRAL SECURITY CONTROL INTRUSION
+                </span>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-black/60 text-red-300 border border-red-400/40 font-mono">
+                  SECTION 22
+                </span>
+              </div>
+              <p className="text-xs text-red-200 mt-1">
+                In-world supervisor <strong>SUP-309</strong> has been incapacitated and security credentials revoked.
+                Note: Web administrator session (<strong>{user?.name || 'Administrator'}</strong>) remains authenticated via secure JWT.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => resetSecurityControlBreach()}
+            className="px-4 py-2 bg-white hover:bg-gray-100 text-red-700 font-extrabold text-xs rounded-xl shadow-lg transition"
+          >
+            Reset Security Control & Restore Operator
+          </button>
+        </div>
+      )}
+
+      {/* External Visitor Approval Widget (Scenario F) */}
+      {state?.externalVisitors && Object.values(state.externalVisitors).filter(v => v.status === 'PENDING_APPROVAL').length > 0 && (
+        <div className="space-y-2">
+          {Object.values(state.externalVisitors).filter(v => v.status === 'PENDING_APPROVAL').map(vis => (
+            <div
+              key={vis.id}
+              className="p-4 bg-gradient-to-r from-blue-950/80 via-slate-900 to-blue-950/60 border-2 border-cyan-500 rounded-2xl flex flex-wrap items-center justify-between gap-4 shadow-2xl animate-in fade-in"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-cyan-950 text-cyan-400 border border-cyan-500/50 rounded-xl">
+                  <Shield className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-white font-bold text-sm">EXTERNAL VISITOR ARRIVAL • {vis.name}</span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-900/60 text-cyan-300 font-bold border border-cyan-500/40">
+                      ID: {vis.id} • {vis.organization}
+                    </span>
+                  </div>
+                  <p className="text-xs text-cyan-200 mt-0.5">
+                    Purpose: <strong>{vis.purpose}</strong> • Location: Outside Gate 01 Sally Port • Escort Required: YES (Officer OFF-201)
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleVisitorDecision(vis.id, 'APPROVE')}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-lg transition flex items-center gap-1.5"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Authorize Entry & Escort</span>
+                </button>
+                <button
+                  onClick={() => handleVisitorDecision(vis.id, 'DENY')}
+                  className="px-3 py-2 bg-red-950 hover:bg-red-900 text-red-300 border border-red-500/40 font-bold text-xs rounded-xl transition"
+                >
+                  Deny Entry
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Scenario B Inmate Escape Attempt Countdown & Intervention Widget */}
+      {state?.activeScenario?.id === 'SCENARIO_B' && (
+        <div className="p-4 bg-gradient-to-r from-amber-950 via-slate-900 to-amber-950 border-2 border-amber-500 rounded-2xl flex flex-wrap items-center justify-between gap-4 shadow-2xl animate-in fade-in">
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-amber-500/20 text-amber-400 border border-amber-500/40 rounded-xl animate-pulse">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-white font-bold text-sm uppercase tracking-wide">
+                  SCENARIO B: ACTIVE ESCAPE ATTEMPT (INMATE P-1044)
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-950 text-amber-300 font-bold border border-amber-500/40">
+                  {30 - Math.min(30, Math.floor(state.activeScenario.elapsedSimSeconds || 0))}s REMAINING
+                </span>
+              </div>
+              <p className="text-xs text-amber-200 mt-1">
+                Marcus Vance is moving rapidly toward Perimeter Sally Port. Contained: <strong>{state.activeScenario.scenarioState?.isContained ? 'YES (INTERCEPTED)' : 'NO (APPROACHING PERIMETER)'}</strong>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => commandGate('GATE-02', 'CLOSE')}
+              className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-bold text-xs rounded-xl shadow-lg transition"
+            >
+              Secure Sally Port Gate 02
+            </button>
+            <button
+              onClick={() => dispatchOfficerTask({ officerId: 'OFF-201', commandType: 'INTERCEPT_INMATE', targetWaypointId: 'W_SALLY_BAY', priority: 'EMERGENCY' })}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-lg transition"
+            >
+              Dispatch Officer Intercept
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Demonstration Scenarios Quick-Trigger Bar (Section 5) */}
+      <div className="bg-[#111827] border border-borderMuted rounded-2xl p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <PlayCircle className="w-4 h-4 text-cyan-400" />
+            <span className="font-bold text-xs text-white uppercase tracking-wider">Demonstration Scenario Engine (A — F)</span>
+          </div>
+          <span className="text-[10px] font-mono text-gray-400">Deterministic Evaluation Suite</span>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2 text-xs">
+          {[
+            { id: 'SCENARIO_A', label: 'Scenario A', desc: 'CCTV & Monitoring', color: 'border-cyan-500/40 text-cyan-300' },
+            { id: 'SCENARIO_B', label: 'Scenario B', desc: 'Escape (30s Timer)', color: 'border-amber-500/40 text-amber-300' },
+            { id: 'SCENARIO_C', label: 'Scenario C', desc: 'Power Cut Lockdown', color: 'border-red-500/40 text-red-300' },
+            { id: 'SCENARIO_D', label: 'Scenario D', desc: 'RFID Revocation', color: 'border-purple-500/40 text-purple-300' },
+            { id: 'SCENARIO_E', label: 'Scenario E', desc: 'Credential Misuse', color: 'border-indigo-500/40 text-indigo-300' },
+            { id: 'SCENARIO_F', label: 'Scenario F', desc: 'Visitor Lin Escort', color: 'border-emerald-500/40 text-emerald-300' },
+          ].map(sc => (
+            <button
+              key={sc.id}
+              onClick={() => startScenario(sc.id)}
+              className={`p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border ${sc.color} text-left transition flex flex-col justify-between`}
+            >
+              <span className="font-bold text-xs">{sc.label}</span>
+              <span className="text-[10px] text-gray-400 truncate mt-0.5">{sc.desc}</span>
+            </button>
+          ))}
         </div>
       </div>
 

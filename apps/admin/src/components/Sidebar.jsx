@@ -22,6 +22,7 @@ export default function Sidebar({ activeTab, onSelectTab }) {
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'cctv', label: 'CCTV Monitoring', icon: Video, badge: '8' },
     { id: 'facility', label: 'Facility Map', icon: Map },
+    { id: 'officer-ops', label: 'Officer Operations', icon: Radio },
     { id: 'access', label: 'Access Control', icon: KeyRound },
     { id: 'tracking', label: 'People & Tracking', icon: Users },
     { id: 'security', label: 'Security Monitoring', icon: AlertTriangle, badge: '3' },

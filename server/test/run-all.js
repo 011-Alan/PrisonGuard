@@ -520,6 +520,162 @@ async function runTests() {
     assert(engine.state.gates['GATE-01']?.state === 'CLOSED', 'Gate reset to default baseline');
     assert(auditLogger.verifyChain().valid === true, 'Audit log chain valid after reset');
 
+    // 23. Camera Sweep, Manual Pan & Angular Limits
+    console.log('\n[SUITE 23: Camera Sweep, Manual Pan & Limits]');
+    const sweepRes = await request('/api/cameras/CAM-01/sweep', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ action: 'START' })
+    });
+    assert(sweepRes.status === 200, 'Start camera sweep endpoint returns HTTP 200');
+    assert(sweepRes.data?.camera?.isSweeping === true, 'Camera CAM-01 enters SWEEP mode');
+
+    const panRes = await request('/api/cameras/CAM-01/pan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ angle: 60 })
+    });
+    assert(panRes.status === 200, 'Manual camera pan endpoint returns HTTP 200');
+    assert(panRes.data?.camera?.angle === 60, 'Camera CAM-01 angle updated to 60 degrees');
+    assert(panRes.data?.camera?.isSweeping === false, 'Manual pan safely disengages auto-sweep');
+
+    // 24. Insider Threat & RFID Credential Revocation
+    console.log('\n[SUITE 24: Insider Threat & RFID Credential Revocation]');
+    const revokeRes = await request('/api/officers/OFC-514/revoke-credential', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}` }
+    });
+    assert(revokeRes.status === 200, 'Revoke credential endpoint returns HTTP 200');
+    assert(revokeRes.data?.officer?.credentialStatus === 'REVOKED', 'Officer OFC-514 credential set to REVOKED');
+    assert(revokeRes.data?.officer?.availability === 'COMPROMISED', 'Officer marked as COMPROMISED');
+
+    // Attempt scan with revoked card
+    const scanRevokedRes = await request('/api/rfid/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ readerId: 'RFID-BLOCK-A', cardId: 'CARD-OFC-514' })
+    });
+    assert(scanRevokedRes.status === 200, 'Scan endpoint processed');
+    assert(scanRevokedRes.data?.accessLog?.result === 'DENIED', 'Revoked RFID credential access strictly DENIED');
+    assert(auditLogger.verifyChain().valid === true, 'Cryptographic audit ledger valid after revocation');
+
+    // 25. External Visitor Management & Role-Based Entry
+    console.log('\n[SUITE 25: External Visitor Management & Role-Based Entry]');
+    const visitorArrivalRes = await request('/api/visitors/arrive', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        visitorId: 'VIS-TEST-01',
+        name: 'Detective Sarah Lin',
+        category: 'INVESTIGATOR',
+        organization: 'State Investigative Bureau',
+        purpose: 'Inspection'
+      })
+    });
+    assert(visitorArrivalRes.status === 200, 'Visitor arrival returns HTTP 200');
+    assert(visitorArrivalRes.data?.visitor?.status === 'AWAITING_APPROVAL', 'Visitor registered as AWAITING_APPROVAL');
+
+    // Operator cannot approve (Admin only)
+    const opApprovalRes = await request('/api/visitors/VIS-TEST-01/decision', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${opToken}` },
+      body: JSON.stringify({ decision: 'APPROVE' })
+    });
+    assert(opApprovalRes.status === 403, 'Operator denied approval permission (HTTP 403)');
+
+    // Admin approves visitor
+    const adminApprovalRes = await request('/api/visitors/VIS-TEST-01/decision', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ decision: 'APPROVE' })
+    });
+    assert(adminApprovalRes.status === 200, 'Admin approves visitor entry (HTTP 200)');
+    assert(adminApprovalRes.data?.visitor?.status === 'APPROVED', 'Visitor status updated to APPROVED');
+
+    // 26. Suspicious Activity Engine & Monitoring Suppression
+    console.log('\n[SUITE 26: Suspicious Activity Engine & Monitoring Suppression]');
+    const suspRes = await request('/api/suspicious/trigger', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        type: 'LOITERING_RESTRICTED_GATE',
+        prisonerId: 'P-2089',
+        location: 'Common Exercise Yard',
+        severity: 'HIGH'
+      })
+    });
+    assert(suspRes.status === 200, 'Suspicious activity trigger returns HTTP 200');
+    assert(suspRes.data?.activity?.status === 'DETECTED', 'Suspicious activity status is DETECTED');
+    assert(engine.state.people['P-2089']?.activity.includes('Suspicious Activity'), 'Target prisoner activity reflects alert');
+
+    // 27. Health Model, Incapacitation & Security Control Breach
+    console.log('\n[SUITE 27: Health Model, Incapacitation & Security Control Breach]');
+    const healthRes = await request('/api/health/change', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ personId: 'SUP-309', delta: -100, reason: 'Simulated Confrontation' })
+    });
+    assert(healthRes.status === 200, 'Health reduction returns HTTP 200');
+    assert(healthRes.data?.person?.health === 0, 'Supervisor SUP-309 health drops to 0');
+    assert(healthRes.data?.person?.healthState === 'INCAPACITATED', 'Supervisor marked INCAPACITATED');
+    assert(engine.state.securityControlBreach?.isBreached === true, 'SIMULATED SECURITY CONTROL BREACH activated');
+
+    // Reset Security Breach
+    const resetBreachRes = await request('/api/security/breach/reset', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}` }
+    });
+    assert(resetBreachRes.status === 200, 'Security breach reset returns HTTP 200');
+    assert(engine.state.securityControlBreach?.isBreached === false, 'Security Control Breach restored to baseline');
+    assert(engine.state.people['SUP-309']?.health === 100, 'Supervisor health restored to 100 HP');
+
+    // 28. Extreme Simulation Time Acceleration (60x & 120x)
+    console.log('\n[SUITE 28: Extreme Simulation Time Acceleration (60x & 120x)]');
+    engine.setSimulationClock({ speed: 60 });
+    assert(engine.state.simulationClock.speed === 60, 'Simulation clock set to 60x speed');
+    const t0 = new Date(engine.state.simulationClock.time).getTime();
+    engine.stepSimulationClock();
+    const t1 = new Date(engine.state.simulationClock.time).getTime();
+    assert(t1 - t0 === 60000, '60x speed advances 60 simulation seconds per 1-second tick');
+
+    engine.setSimulationClock({ speed: 120 });
+    assert(engine.state.simulationClock.speed === 120, 'Simulation clock set to 120x speed');
+    engine.stepSimulationClock();
+    const t2 = new Date(engine.state.simulationClock.time).getTime();
+    assert(t2 - t1 === 120000, '120x speed advances 120 simulation seconds per 1-second tick');
+
+    engine.setSimulationClock({ speed: 1 }); // restore normal speed
+
+    // 29. Deterministic Scenario Engine & Demonstration Scenarios
+    console.log('\n[SUITE 29: Deterministic Scenario Engine & Registry]');
+    const scenariosRes = await request('/api/scenarios');
+    assert(scenariosRes.status === 200, 'Scenarios registry endpoint returns HTTP 200');
+    assert(Object.keys(scenariosRes.data?.scenarios || {}).length >= 14, 'All 14 simulation scenarios registered');
+    assert(scenariosRes.data?.scenarios['SCENARIO_A_CCTV_ALERT'] !== undefined, 'Demonstration Scenario A registered');
+    assert(scenariosRes.data?.scenarios['SCENARIO_B_ESCAPE_INTERVENTION'] !== undefined, 'Demonstration Scenario B registered');
+    assert(scenariosRes.data?.scenarios['SCENARIO_C_POWER_FAILURE'] !== undefined, 'Demonstration Scenario C registered');
+    assert(scenariosRes.data?.scenarios['SCENARIO_D_COMPROMISED_OFFICER'] !== undefined, 'Demonstration Scenario D registered');
+    assert(scenariosRes.data?.scenarios['SCENARIO_E_CREDENTIAL_MISUSE'] !== undefined, 'Demonstration Scenario E registered');
+    assert(scenariosRes.data?.scenarios['SCENARIO_F_EXTERNAL_VISITOR'] !== undefined, 'Demonstration Scenario F registered');
+
+    // Start Demonstration Scenario A
+    const startScenRes = await request('/api/scenarios/SCENARIO_A_CCTV_ALERT/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ seed: 101 })
+    });
+    assert(startScenRes.status === 200, 'Scenario A start returns HTTP 200');
+    assert(engine.state.activeScenario === 'SCENARIO_A_CCTV_ALERT', 'Active scenario is SCENARIO_A_CCTV_ALERT');
+
+    // 30. IoT Communication Topology & Access Point Associations
+    console.log('\n[SUITE 30: IoT Communication Topology & Access Points]');
+    const topoRes = await request('/api/topology');
+    assert(topoRes.status === 200, 'Topology endpoint returns HTTP 200');
+    assert(Object.keys(topoRes.data?.accessPoints || {}).length >= 5, '5 facility Wi-Fi Access Points configured');
+    assert(topoRes.data?.metadata?.backend?.port === 5000, 'Backend metadata reports Port 5000');
+    assert(topoRes.data?.accessPoints['AP-NORTH-CORR']?.associatedControllers?.includes('ESP32-CELL-01'), 'AP associations accurate');
+
+
   } catch (err) {
     console.error('Test execution error:', err);
     failed++;

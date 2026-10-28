@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard';
 import CctvMonitoring from './pages/CctvMonitoring';
 import FacilityOverview from './pages/FacilityOverview';
 import PeopleTracking from './pages/PeopleTracking';
+import OfficerOperations from './pages/OfficerOperations';
 import AccessControl from './pages/AccessControl';
 import SecurityMonitoring from './pages/SecurityMonitoring';
 import HealthcareWelfare from './pages/HealthcareWelfare';
@@ -47,6 +48,7 @@ function AuthenticatedApp() {
           {activeTab === 'dashboard' && <Dashboard onNavigateTab={setActiveTab} />}
           {activeTab === 'cctv' && <CctvMonitoring />}
           {activeTab === 'facility' && <FacilityOverview />}
+          {activeTab === 'officer-ops' && <OfficerOperations />}
           {activeTab === 'tracking' && <PeopleTracking />}
           {activeTab === 'access' && <AccessControl />}
           {activeTab === 'security' && <SecurityMonitoring />}

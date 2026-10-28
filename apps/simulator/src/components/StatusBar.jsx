@@ -33,7 +33,16 @@ export default function StatusBar({ onOpenCommInspector }) {
         </div>
       )}
 
-      {/* Simulation Clock & Accelerated Speed Controls (Section 8) */}
+      {/* Active Scenario Elapsed Pill */}
+      {activeScenario && (
+        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-cyan-950/70 border border-cyan-500/50 text-cyan-300 font-mono text-[11px]">
+          <Activity className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+          <span className="font-bold">{activeScenario.name || activeScenario.id}</span>
+          <span className="text-[10px] text-cyan-200">({Math.round(activeScenario.elapsedSimSeconds || 0)}s sim)</span>
+        </div>
+      )}
+
+      {/* Simulation Clock & Accelerated Speed Controls (Section 15: Monotonic Accelerated Time) */}
       {simClock && (
         <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-slate-800/80 border border-slate-700 text-gray-300 font-mono text-[11px]">
           <Clock className="w-3.5 h-3.5 text-cyan-400" />
@@ -48,24 +57,21 @@ export default function StatusBar({ onOpenCommInspector }) {
             >
               {isPaused ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
             </button>
-            <button
-              onClick={() => handleSpeedChange(1)}
-              className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition ${currentSpeed === 1 && !isPaused ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'}`}
-            >
-              1×
-            </button>
-            <button
-              onClick={() => handleSpeedChange(2)}
-              className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition ${currentSpeed === 2 && !isPaused ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'}`}
-            >
-              2×
-            </button>
-            <button
-              onClick={() => handleSpeedChange(3)}
-              className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition ${currentSpeed === 3 && !isPaused ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'}`}
-            >
-              3×
-            </button>
+
+            {[0.5, 1, 2, 5, 10, 30, 60, 120].map((spd) => (
+              <button
+                key={spd}
+                onClick={() => handleSpeedChange(spd)}
+                title={`Simulate at ${spd}x speed (${spd === 60 ? '1 sim hr/real min' : spd === 120 ? '2 sim hr/real min' : `${spd}x`})`}
+                className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition ${
+                  currentSpeed === spd && !isPaused
+                    ? 'bg-cyan-600 text-white shadow-sm'
+                    : 'text-gray-400 hover:text-white hover:bg-slate-700/60'
+                } ${spd > 10 ? 'hidden xl:inline' : spd > 2 ? 'hidden md:inline' : 'inline'}`}
+              >
+                {spd}×
+              </button>
+            ))}
           </div>
         </div>
       )}

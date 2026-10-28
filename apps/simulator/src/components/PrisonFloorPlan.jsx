@@ -35,7 +35,19 @@ export default function PrisonFloorPlan({
   selectedDevice,
   onSelectDevice,
   isFollowing,
-  showRoute
+  showRoute,
+  displaySettings = {
+    showPeopleLabels: true,
+    showHealthBars: true,
+    showSpeechBubbles: true,
+    showCameraFov: true,
+    showSensors: true,
+    showActuators: true,
+    showAccessPoints: true,
+    showIoTLinks: true,
+    showLegend: true
+  },
+  onSelectCommLink
 }) {
   const { state, commandGate } = useSocket();
   const svgRef = useRef(null);
@@ -118,6 +130,17 @@ export default function PrisonFloorPlan({
             <stop offset="0%" stopColor="#ef4444" stopOpacity="0.8" />
             <stop offset="100%" stopColor="#ef4444" stopOpacity="0" />
           </radialGradient>
+
+          {/* IoT Flow Direction Markers */}
+          <marker id="comm-arrow-cyan" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#06b6d4" />
+          </marker>
+          <marker id="comm-arrow-green" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#10b981" />
+          </marker>
+          <marker id="comm-arrow-purple" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#a855f7" />
+          </marker>
         </defs>
 
         {/* ---------------- 1. OUTER PERIMETER SECURITY ---------------- */}
@@ -457,8 +480,9 @@ export default function PrisonFloorPlan({
         })}
 
         {/* ---------------- 3C. PUBLIC ADDRESS SPEAKERS (ACTUATORS) ---------------- */}
-        {speakers.map((spk) => {
+        {displaySettings?.showActuators !== false && speakers.map((spk) => {
           const isBroadcasting = spk.state === 'BROADCASTING';
+          const maxRange = spk.range || 200;
 
           return (
             <g
@@ -469,12 +493,24 @@ export default function PrisonFloorPlan({
               }}
               className="cursor-pointer group"
             >
-              {/* Animated Sound Ripple if Broadcasting */}
+              {/* Concentric Expanding Audio-Propagation Waves (Bounded by spk.range, no projectile ball) */}
               {isBroadcasting && (
-                <>
-                  <circle cx={spk.x} cy={spk.y} r="18" fill="none" stroke="#38bdf8" strokeWidth="2" className="animate-ping opacity-75" />
-                  <circle cx={spk.x} cy={spk.y} r="28" fill="none" stroke="#0284c7" strokeWidth="1.5" className="animate-ping opacity-40" />
-                </>
+                <g pointerEvents="none">
+                  <circle cx={spk.x} cy={spk.y} r="16" fill="none" stroke="#38bdf8" strokeWidth="2.5" opacity="0.85">
+                    <animate attributeName="r" from="16" to={maxRange} dur="2.4s" repeatCount="indefinite" />
+                    <animate attributeName="opacity" from="0.85" to="0" dur="2.4s" repeatCount="indefinite" />
+                  </circle>
+                  <circle cx={spk.x} cy={spk.y} r="16" fill="none" stroke="#0284c7" strokeWidth="1.8" opacity="0.85">
+                    <animate attributeName="r" from="16" to={maxRange} begin="0.8s" dur="2.4s" repeatCount="indefinite" />
+                    <animate attributeName="opacity" from="0.85" to="0" begin="0.8s" dur="2.4s" repeatCount="indefinite" />
+                  </circle>
+                  <circle cx={spk.x} cy={spk.y} r="16" fill="none" stroke="#06b6d4" strokeWidth="1.2" opacity="0.85">
+                    <animate attributeName="r" from="16" to={maxRange} begin="1.6s" dur="2.4s" repeatCount="indefinite" />
+                    <animate attributeName="opacity" from="0.85" to="0" begin="1.6s" dur="2.4s" repeatCount="indefinite" />
+                  </circle>
+                  {/* Audible boundary ring */}
+                  <circle cx={spk.x} cy={spk.y} r={maxRange} fill="none" stroke="#38bdf8" strokeWidth="1" strokeDasharray="4,4" opacity="0.3" />
+                </g>
               )}
 
               {/* Speaker Horn Icon Body */}
@@ -501,48 +537,232 @@ export default function PrisonFloorPlan({
           );
         })}
 
-        {/* ---------------- 4. IOT HARDWARE OVERLAY (Sensors, Beams, ESP32) ---------------- */}
+        {/* ---------------- 4. IOT HARDWARE OVERLAY (Sensors, Beams, ESP32, APs, Links) ---------------- */}
         {showIoTOverlay && (
           <g id="IoTOverlay">
+            {/* 4A. 4-LAYER IOT COMMUNICATION TOPOLOGY LINKS */}
+            {displaySettings?.showIoTLinks !== false && (
+              <g id="IoTCommLinks">
+                {/* Layer 2 -> Layer 3: ESP32 Controllers to Wi-Fi Access Points */}
+                {[
+                  { from: { x: 240, y: 90 }, to: { x: 500, y: 320 }, ctrl: 'ESP32-CELL-01', ap: 'AP-NORTH-CORR' },
+                  { from: { x: 670, y: 90 }, to: { x: 500, y: 320 }, ctrl: 'ESP32-CELL-02', ap: 'AP-NORTH-CORR' },
+                  { from: { x: 1100, y: 90 }, to: { x: 500, y: 320 }, ctrl: 'ESP32-CELL-03', ap: 'AP-NORTH-CORR' },
+                  { from: { x: 650, y: 700 }, to: { x: 1050, y: 780 }, ctrl: 'ESP32-ACCESS-01', ap: 'AP-YARD-SALLY' },
+                  { from: { x: 240, y: 360 }, to: { x: 300, y: 700 }, ctrl: 'ESP32-MED-01', ap: 'AP-WEST-MED' },
+                  { from: { x: 1320, y: 640 }, to: { x: 1250, y: 220 }, ctrl: 'ESP32-CAM-HUB', ap: 'AP-ADMIN-SOC' },
+                  { from: { x: 1430, y: 90 }, to: { x: 1400, y: 450 }, ctrl: 'ESP32-PERIM-01', ap: 'AP-EAST-PERIM' },
+                  { from: { x: 170, y: 910 }, to: { x: 300, y: 700 }, ctrl: 'ESP32-PERIM-02', ap: 'AP-WEST-MED' },
+                ].map((l, idx) => (
+                  <line
+                    key={`l2-l3-${idx}`}
+                    x1={l.from.x}
+                    y1={l.from.y}
+                    x2={l.to.x}
+                    y2={l.to.y}
+                    stroke="#06b6d4"
+                    strokeWidth="1.5"
+                    strokeDasharray="5,4"
+                    opacity="0.5"
+                    markerEnd="url(#comm-arrow-cyan)"
+                    className="cursor-pointer hover:stroke-cyan-300 hover:stroke-[2.5px] transition"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelectCommLink && onSelectCommLink({
+                        sourceId: l.ctrl,
+                        sourceName: `ESP32 Controller (${l.ctrl})`,
+                        sourceType: 'CONTROLLER',
+                        destId: l.ap,
+                        destName: `Wi-Fi Access Point (${l.ap})`,
+                        destType: 'ACCESS_POINT',
+                        protocol: '802.11ax WPA3-Enterprise (2.4GHz / 5GHz)',
+                        direction: 'BIDIRECTIONAL',
+                        isRealImplementation: false,
+                        samplePayload: {
+                          msg_type: 'TELEMETRY_HEARTBEAT',
+                          controller_id: l.ctrl,
+                          ap_bssid: 'E4:5F:01:8A:92:C0',
+                          rssi_dbm: -54,
+                          uptime_sec: 14320,
+                          free_heap_bytes: 184320,
+                          status: 'ACK_CONFIRMED'
+                        },
+                        deliveryStatus: 'CONFIRMED_ACK',
+                        latencyMs: 3,
+                        packetLossRate: '0.00%',
+                        eventTrace: [
+                          { name: 'Hardware GPIO Edge Detection', layer: 'Sensor / GPIO', status: 'COMPLETED' },
+                          { name: 'ESP32 RTOS Interrupt Queue', layer: 'ESP32 Controller', status: 'COMPLETED' },
+                          { name: 'WPA3 Wi-Fi Packet Egress', layer: 'Wi-Fi Access Point', status: 'COMPLETED' },
+                          { name: 'Backend MQTT Broker Ingestion', layer: 'Shared Backend', status: 'COMPLETED' },
+                          { name: 'State Aggregation & Socket Broadcast', layer: 'Socket Server', status: 'COMPLETED' },
+                          { name: 'Security Console Reactive Render', layer: 'Central Security SOC', status: 'COMPLETED' }
+                        ]
+                      });
+                    }}
+                  />
+                ))}
+
+                {/* Layer 3 -> Layer 4: Wi-Fi Access Points to Backend & Central Security Control */}
+                {[
+                  { from: { x: 500, y: 320 }, to: { x: 1250, y: 220 }, ap: 'AP-NORTH-CORR' },
+                  { from: { x: 1050, y: 780 }, to: { x: 1250, y: 220 }, ap: 'AP-YARD-SALLY' },
+                  { from: { x: 300, y: 700 }, to: { x: 1250, y: 220 }, ap: 'AP-WEST-MED' },
+                  { from: { x: 1400, y: 450 }, to: { x: 1250, y: 220 }, ap: 'AP-EAST-PERIM' },
+                ].map((l, idx) => (
+                  <line
+                    key={`l3-l4-${idx}`}
+                    x1={l.from.x}
+                    y1={l.from.y}
+                    x2={l.to.x}
+                    y2={l.to.y}
+                    stroke="#a855f7"
+                    strokeWidth="1.8"
+                    strokeDasharray="6,4"
+                    opacity="0.6"
+                    markerEnd="url(#comm-arrow-purple)"
+                    className="cursor-pointer hover:stroke-purple-300 hover:stroke-[3px] transition"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelectCommLink && onSelectCommLink({
+                        sourceId: l.ap,
+                        sourceName: `Wi-Fi Access Point (${l.ap})`,
+                        sourceType: 'ACCESS_POINT',
+                        destId: 'CENTRAL-SOC-CORE',
+                        destName: 'Backend Core & Security Console',
+                        destType: 'BACKEND',
+                        protocol: 'Gigabit PoE LAN / Secure Socket.IO (TLS)',
+                        direction: 'BIDIRECTIONAL',
+                        isRealImplementation: true,
+                        samplePayload: {
+                          event: 'FACILITY_STATE_SYNC',
+                          ap_uplink: l.ap,
+                          vlan: 'VLAN-10-SECURITY',
+                          transport: 'REAL_WEBSOCKET_SOCKET_IO',
+                          connected_clients: 2,
+                          state_version: 1842
+                        },
+                        deliveryStatus: 'CONFIRMED_ACK',
+                        latencyMs: 1,
+                        packetLossRate: '0.00%',
+                        eventTrace: [
+                          { name: 'AP VLAN 10 Frame Forwarding', layer: 'PoE Switch Backbone', status: 'COMPLETED' },
+                          { name: 'Node.js Express / Socket.IO Ingest', layer: 'Shared Backend', status: 'COMPLETED' },
+                          { name: 'Authoritative State Mutation', layer: 'Simulation Engine', status: 'COMPLETED' },
+                          { name: 'WebSocket JSON Broadcast', layer: 'Socket.IO Server', status: 'COMPLETED' },
+                          { name: 'Admin Dashboard Reactive Dispatch', layer: 'Central Security SOC', status: 'COMPLETED' },
+                          { name: 'Cryptographic Audit Block Hash', layer: 'Security Audit', status: 'COMPLETED' }
+                        ]
+                      });
+                    }}
+                  />
+                ))}
+              </g>
+            )}
+
             {/* Infrared Laser Beams across perimeter */}
-            <line
-              x1="200"
-              y1="50"
-              x2="1400"
-              y2="50"
-              stroke={state?.devices?.['IR-BEAM-N']?.value === 'BROKEN' ? '#ef4444' : '#10b981'}
-              strokeWidth={state?.devices?.['IR-BEAM-N']?.value === 'BROKEN' ? '3' : '1.5'}
-              strokeDasharray={state?.devices?.['IR-BEAM-N']?.value === 'BROKEN' ? '6,4' : 'none'}
-              opacity="0.75"
-            />
-            <line
-              x1="1485"
-              y1="80"
-              x2="1485"
-              y2="900"
-              stroke={state?.devices?.['IR-BEAM-E']?.value === 'BROKEN' ? '#ef4444' : '#10b981'}
-              strokeWidth={state?.devices?.['IR-BEAM-E']?.value === 'BROKEN' ? '4' : '1.5'}
-              strokeDasharray={state?.devices?.['IR-BEAM-E']?.value === 'BROKEN' ? '6,4' : 'none'}
-              opacity="0.8"
-            />
-            <line
-              x1="115"
-              y1="80"
-              x2="115"
-              y2="900"
-              stroke="#10b981"
-              strokeWidth="1.5"
-              opacity="0.75"
-            />
-            <line
-              x1="200"
-              y1="940"
-              x2="1400"
-              y2="940"
-              stroke="#10b981"
-              strokeWidth="1.5"
-              opacity="0.75"
-            />
+            {displaySettings?.showSensors !== false && (
+              <>
+                <line
+                  x1="200"
+                  y1="50"
+                  x2="1400"
+                  y2="50"
+                  stroke={state?.devices?.['IR-BEAM-N']?.value === 'BROKEN' ? '#ef4444' : '#10b981'}
+                  strokeWidth={state?.devices?.['IR-BEAM-N']?.value === 'BROKEN' ? '3' : '1.5'}
+                  strokeDasharray={state?.devices?.['IR-BEAM-N']?.value === 'BROKEN' ? '6,4' : 'none'}
+                  opacity="0.75"
+                />
+                <line
+                  x1="1485"
+                  y1="80"
+                  x2="1485"
+                  y2="900"
+                  stroke={state?.devices?.['IR-BEAM-E']?.value === 'BROKEN' ? '#ef4444' : '#10b981'}
+                  strokeWidth={state?.devices?.['IR-BEAM-E']?.value === 'BROKEN' ? '4' : '1.5'}
+                  strokeDasharray={state?.devices?.['IR-BEAM-E']?.value === 'BROKEN' ? '6,4' : 'none'}
+                  opacity="0.8"
+                />
+                <line
+                  x1="115"
+                  y1="80"
+                  x2="115"
+                  y2="900"
+                  stroke="#10b981"
+                  strokeWidth="1.5"
+                  opacity="0.75"
+                />
+                <line
+                  x1="200"
+                  y1="940"
+                  x2="1400"
+                  y2="940"
+                  stroke="#10b981"
+                  strokeWidth="1.5"
+                  opacity="0.75"
+                />
+              </>
+            )}
+
+            {/* Wi-Fi Access Points (APs) */}
+            {displaySettings?.showAccessPoints !== false && (state?.accessPoints ? Object.values(state.accessPoints) : []).map((ap) => {
+              const isOnline = ap.status === 'ONLINE';
+              return (
+                <g
+                  key={ap.id}
+                  className="cursor-pointer group"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectDevice && onSelectDevice({
+                      id: ap.id,
+                      name: ap.name,
+                      type: 'ACCESS_POINT',
+                      location: ap.location,
+                      status: ap.status,
+                      ip: ap.ip,
+                      channel: ap.channel,
+                      band: ap.band,
+                      connectedControllers: ap.connectedControllers
+                    });
+                  }}
+                >
+                  {/* Radio Coverage Radius Circle */}
+                  <circle
+                    cx={ap.x}
+                    cy={ap.y}
+                    r={ap.coverageRadius || 180}
+                    fill={isOnline ? '#06b6d4' : '#64748b'}
+                    fillOpacity="0.04"
+                    stroke={isOnline ? '#06b6d4' : '#64748b'}
+                    strokeWidth="1"
+                    strokeDasharray="4,4"
+                    opacity="0.45"
+                  />
+                  {/* AP Outer Ring */}
+                  <circle cx={ap.x} cy={ap.y} r="9" fill="#0f172a" stroke={isOnline ? '#38bdf8' : '#ef4444'} strokeWidth="1.5" />
+                  {/* Radio Waves */}
+                  <path
+                    d={`M ${ap.x - 4.5} ${ap.y - 2} A 5 5 0 0 1 ${ap.x + 4.5} ${ap.y - 2}`}
+                    fill="none"
+                    stroke={isOnline ? '#38bdf8' : '#ef4444'}
+                    strokeWidth="1.3"
+                  />
+                  <circle cx={ap.x} cy={ap.y + 2} r="2" fill={isOnline ? '#10b981' : '#ef4444'} />
+                  {/* Label */}
+                  <text
+                    x={ap.x}
+                    y={ap.y - 13}
+                    fill="#38bdf8"
+                    fontSize="7.5"
+                    fontWeight="bold"
+                    textAnchor="middle"
+                    className="opacity-0 group-hover:opacity-100 transition pointer-events-none drop-shadow"
+                  >
+                    {ap.name} ({ap.status})
+                  </text>
+                </g>
+              );
+            })}
 
             {/* ESP32 Controller Nodes */}
             {controllers.map((ctrl) => {
@@ -566,7 +786,7 @@ export default function PrisonFloorPlan({
             })}
 
             {/* Individual Sensors */}
-            {devices.map((dev) => {
+            {displaySettings?.showSensors !== false && devices.map((dev) => {
               if (!dev.x || !dev.y) return null;
               const isSelected = selectedDevice?.id === dev.id;
               const isOnline = dev.status === 'ONLINE';
@@ -610,7 +830,7 @@ export default function PrisonFloorPlan({
               );
             })}
 
-            {/* CCTV Security Cameras & Viewing Cones (Slanted Perspective Ground-Truth) */}
+            {/* CCTV Security Cameras & Viewing Cones (Industrial Surveillance Glyphs, no ping ball) */}
             {cameras.map((cam) => {
               const isOnline = cam.status === 'ONLINE';
               const conePath = getCameraFovPath(cam.x, cam.y, cam.angle, cam.fov, cam.distance);
@@ -626,25 +846,40 @@ export default function PrisonFloorPlan({
                   }}
                   className="cursor-pointer group"
                 >
-                  {/* FOV Wedge Cone */}
-                  <path
-                    d={conePath}
-                    fill={isOnline ? (entityCount > 0 ? '#06b6d4' : '#0284c7') : '#64748b'}
-                    fillOpacity={isOnline ? (entityCount > 0 ? '0.16' : '0.07') : '0.02'}
-                    stroke={isOnline ? (entityCount > 0 ? '#06b6d4' : '#0284c7') : '#64748b'}
-                    strokeWidth="1.2"
-                    strokeDasharray="4,3"
-                    opacity={isOnline ? '0.85' : '0.25'}
-                  />
+                  {/* FOV Wedge Cone (Section 17) */}
+                  {displaySettings?.showCameraFov !== false && (
+                    <path
+                      d={conePath}
+                      fill={isOnline ? (entityCount > 0 ? '#06b6d4' : '#0284c7') : '#64748b'}
+                      fillOpacity={isOnline ? (entityCount > 0 ? '0.16' : '0.07') : '0.02'}
+                      stroke={isOnline ? (entityCount > 0 ? '#06b6d4' : '#0284c7') : '#64748b'}
+                      strokeWidth="1.2"
+                      strokeDasharray="4,3"
+                      opacity={isOnline ? '0.85' : '0.25'}
+                    />
+                  )}
 
                   {/* Selection Ring */}
                   {isSelected && (
                     <circle cx={cam.x} cy={cam.y} r="16" fill="none" stroke="#38bdf8" strokeWidth="2.5" className="animate-pulse" />
                   )}
 
-                  {/* Camera Body Icon */}
-                  <circle cx={cam.x} cy={cam.y} r="8" fill="#0f172a" stroke={isOnline ? '#06b6d4' : '#ef4444'} strokeWidth="1.5" />
-                  <circle cx={cam.x} cy={cam.y} r="3" fill={isOnline ? (entityCount > 0 ? '#38bdf8' : '#10b981') : '#ef4444'} className={isOnline && entityCount > 0 ? 'animate-ping' : ''} />
+                  {/* Industrial Surveillance Camera Glyph (Section 16: Housing & Lens oriented along cam.angle) */}
+                  <g transform={`rotate(${cam.angle}, ${cam.x}, ${cam.y})`}>
+                    {/* Mounting Bracket Base */}
+                    <rect x={cam.x - 7} y={cam.y - 3} width="4" height="6" rx="1" fill="#475569" stroke="#334155" strokeWidth="0.8" />
+                    {/* Industrial Surveillance Housing Body */}
+                    <path
+                      d={`M ${cam.x - 3} ${cam.y - 6} L ${cam.x + 9} ${cam.y - 4} L ${cam.x + 9} ${cam.y + 4} L ${cam.x - 3} ${cam.y + 6} Z`}
+                      fill="#0f172a"
+                      stroke={isOnline ? (entityCount > 0 ? '#38bdf8' : '#06b6d4') : '#ef4444'}
+                      strokeWidth="1.5"
+                    />
+                    {/* Front Optical Lens Barrel */}
+                    <rect x={cam.x + 9} y={cam.y - 3} width="3" height="6" rx="0.8" fill={isOnline ? (entityCount > 0 ? '#38bdf8' : '#10b981') : '#ef4444'} />
+                    {/* Operational LED Indicator (solid status, no ping ball) */}
+                    <circle cx={cam.x + 3} cy={cam.y} r="1.5" fill={isOnline ? '#10b981' : '#ef4444'} />
+                  </g>
 
                   {/* Camera Label Tag */}
                   <text
@@ -656,7 +891,7 @@ export default function PrisonFloorPlan({
                     textAnchor="middle"
                     className="drop-shadow select-none pointer-events-none"
                   >
-                    {cam.id} {entityCount > 0 ? `(${entityCount}👁)` : ''}
+                    {cam.id} {cam.isSweeping ? '⟳' : ''} {entityCount > 0 ? `(${entityCount}👁)` : ''}
                   </text>
                 </g>
               );
@@ -762,32 +997,94 @@ export default function PrisonFloorPlan({
                 {beaconInitial}
               </text>
 
+              {/* Health Gauge Bar (Section 12: 0-100 Health Model) */}
+              {(displaySettings?.showHealthBars !== false || (person.health !== undefined && person.health < 100)) && (
+                <g pointerEvents="none">
+                  {/* Health Bar Background Track */}
+                  <rect
+                    x={person.x - 14}
+                    y={person.y - 17}
+                    width="28"
+                    height="3.5"
+                    rx="1"
+                    fill="#0f172a"
+                    stroke="#334155"
+                    strokeWidth="0.6"
+                  />
+                  {/* Health Bar Fill */}
+                  <rect
+                    x={person.x - 14}
+                    y={person.y - 17}
+                    width={Math.max(2, (28 * Math.max(0, Math.min(100, person.health ?? 100))) / 100)}
+                    height="3.5"
+                    rx="1"
+                    fill={
+                      (person.health ?? 100) > 65
+                        ? '#10b981'
+                        : (person.health ?? 100) > 25
+                        ? '#f59e0b'
+                        : '#ef4444'
+                    }
+                  />
+                </g>
+              )}
+
+              {/* Incapacitated State Alert Badge */}
+              {person.healthState === 'INCAPACITATED' && (
+                <g className="animate-pulse">
+                  <rect
+                    x={person.x - 45}
+                    y={person.y - 32}
+                    width="90"
+                    height="13"
+                    rx="3"
+                    fill="#7f1d1d"
+                    stroke="#ef4444"
+                    strokeWidth="1"
+                  />
+                  <text
+                    x={person.x}
+                    y={person.y - 23}
+                    fill="#fecaca"
+                    fontSize="7"
+                    fontWeight="extrabold"
+                    textAnchor="middle"
+                  >
+                    ✚ INCAPACITATED
+                  </text>
+                </g>
+              )}
+
               {/* Floating Name Badge */}
-              <rect
-                x={person.x - 32}
-                y={person.y + 12}
-                width="64"
-                height="15"
-                rx="3"
-                fill="#0f172a"
-                stroke={beaconStroke}
-                strokeWidth="1"
-                opacity="0.9"
-              />
-              <text
-                x={person.x}
-                y={person.y + 23}
-                fill="#ffffff"
-                fontSize="8"
-                fontWeight="bold"
-                textAnchor="middle"
-                pointerEvents="none"
-              >
-                {person.id}
-              </text>
+              {displaySettings?.showPeopleLabels !== false && (
+                <>
+                  <rect
+                    x={person.x - 32}
+                    y={person.y + 12}
+                    width="64"
+                    height="15"
+                    rx="3"
+                    fill="#0f172a"
+                    stroke={beaconStroke}
+                    strokeWidth="1"
+                    opacity="0.9"
+                  />
+                  <text
+                    x={person.x}
+                    y={person.y + 23}
+                    fill="#ffffff"
+                    fontSize="8"
+                    fontWeight="bold"
+                    textAnchor="middle"
+                    pointerEvents="none"
+                  >
+                    {person.id}
+                  </text>
+                </>
+              )}
 
               {/* Floating Message Bubble (Officer Radio / Communication) */}
-              {person.messageBubble && person.messageBubble.text && (
+              {displaySettings?.showSpeechBubbles !== false && person.messageBubble && person.messageBubble.text && (
                 <g className="animate-bounce" style={{ animationDuration: '2.5s' }}>
                   <rect
                     x={person.x - 90}
@@ -929,53 +1226,55 @@ export default function PrisonFloorPlan({
       </svg>
 
       {/* Floating Tactical Map Legend (Bottom-Left) */}
-      <div className="absolute bottom-5 left-5 bg-[#0f172a]/95 backdrop-blur-md border border-slate-700/80 rounded-xl p-3 text-xs text-gray-300 space-y-2 shadow-2xl select-none max-w-xs">
-        <span className="font-bold text-white text-[10px] uppercase tracking-wider block border-b border-slate-800 pb-1">
-          Tactical Map Legend & Symbols
-        </span>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
-          <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
-            <span>Officer (G)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-purple-500"></span>
-            <span>Supervisor (SUP)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-            <span>Medical (MD/RN)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
-            <span>Inmate Beacon (P)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3.5 h-1.5 bg-slate-700 border border-slate-500"></span>
-            <span>Cell Door (L/U)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3.5 h-1.5 bg-cyan-900 border border-cyan-400"></span>
-            <span>Perimeter Gate</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 bg-cyan-950 border border-cyan-400"></span>
-            <span>ESP32 Gateway</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-sky-500"></span>
-            <span>PA Speaker Horn</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-4 h-0.5 bg-emerald-400"></span>
-            <span>IR Optical Beam</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>
-            <span>Alarm / Breach</span>
+      {displaySettings?.showLegend !== false && (
+        <div className="absolute bottom-5 left-5 bg-[#0f172a]/95 backdrop-blur-md border border-slate-700/80 rounded-xl p-3 text-xs text-gray-300 space-y-2 shadow-2xl select-none max-w-xs">
+          <span className="font-bold text-white text-[10px] uppercase tracking-wider block border-b border-slate-800 pb-1">
+            Tactical Map Legend & Symbols
+          </span>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
+              <span>Officer (G)</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-purple-500"></span>
+              <span>Supervisor (SUP)</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+              <span>Medical (MD/RN)</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+              <span>Inmate Beacon (P)</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3.5 h-1.5 bg-slate-700 border border-slate-500"></span>
+              <span>Cell Door (L/U)</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3.5 h-1.5 bg-cyan-900 border border-cyan-400"></span>
+              <span>Perimeter Gate</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 bg-cyan-950 border border-cyan-400"></span>
+              <span>ESP32 Gateway</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-sky-500"></span>
+              <span>PA Speaker Horn</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-4 h-0.5 bg-emerald-400"></span>
+              <span>IR Optical Beam</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>
+              <span>Alarm / Breach</span>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

@@ -115,8 +115,12 @@ export function SocketProvider({ children }) {
           speakers: tickData.speakers || prev.speakers,
           lockdown: tickData.lockdown || prev.lockdown,
           cameras: tickData.cameras || prev.cameras,
+          accessPoints: tickData.accessPoints || prev.accessPoints,
           officerRadioRequests: tickData.officerRadioRequests || prev.officerRadioRequests,
-          officerTasks: tickData.officerTasks || prev.officerTasks
+          officerTasks: tickData.officerTasks || prev.officerTasks,
+          suspiciousActivities: tickData.suspiciousActivities || prev.suspiciousActivities,
+          externalVisitors: tickData.externalVisitors || prev.externalVisitors,
+          securityControlBreach: tickData.securityControlBreach || prev.securityControlBreach
         };
       });
     });
@@ -306,6 +310,42 @@ export function SocketProvider({ children }) {
     }).then(r => r.json());
   };
 
+  const sweepCamera = async (cameraId, action = 'TOGGLE') => {
+    return fetch(`${API_BASE_URL}/api/cameras/${cameraId}/sweep`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer SIMULATOR_BYPASS'
+      },
+      body: JSON.stringify({ action })
+    }).then(r => r.json());
+  };
+
+  const panCamera = async (cameraId, angle) => {
+    return fetch(`${API_BASE_URL}/api/cameras/${cameraId}/pan`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer SIMULATOR_BYPASS'
+      },
+      body: JSON.stringify({ angle })
+    }).then(r => r.json());
+  };
+
+  const pauseScenario = async () => {
+    return fetch(`${API_BASE_URL}/api/scenarios/pause`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer SIMULATOR_BYPASS' }
+    }).then(r => r.json());
+  };
+
+  const resumeScenario = async () => {
+    return fetch(`${API_BASE_URL}/api/scenarios/resume`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer SIMULATOR_BYPASS' }
+    }).then(r => r.json());
+  };
+
   return (
     <SocketContext.Provider
       value={{
@@ -327,11 +367,15 @@ export function SocketProvider({ children }) {
         movePerson,
         startScenario,
         stopScenario,
+        pauseScenario,
+        resumeScenario,
         resetSimulation,
         controlClock,
         startControlledEscape,
         startMassEscape,
         toggleCamera,
+        sweepCamera,
+        panCamera,
         triggerOfficerMedical,
         respondToRadioRequest
       }}
