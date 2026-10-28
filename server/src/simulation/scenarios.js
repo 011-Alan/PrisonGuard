@@ -272,6 +272,14 @@ export const SCENARIO_REGISTRY = {
   }
 };
 
+// Aliases for short scenario keys
+SCENARIO_REGISTRY['SCENARIO_A'] = SCENARIO_REGISTRY['SCENARIO_A_CCTV_ALERT'];
+SCENARIO_REGISTRY['SCENARIO_B'] = SCENARIO_REGISTRY['SCENARIO_B_ESCAPE_INTERVENTION'];
+SCENARIO_REGISTRY['SCENARIO_C'] = SCENARIO_REGISTRY['SCENARIO_C_POWER_FAILURE'];
+SCENARIO_REGISTRY['SCENARIO_D'] = SCENARIO_REGISTRY['SCENARIO_D_COMPROMISED_OFFICER'];
+SCENARIO_REGISTRY['SCENARIO_E'] = SCENARIO_REGISTRY['SCENARIO_E_CREDENTIAL_MISUSE'];
+SCENARIO_REGISTRY['SCENARIO_F'] = SCENARIO_REGISTRY['SCENARIO_F_EXTERNAL_VISITOR'];
+
 export class ScenarioRunner {
   constructor(engine) {
     this.engine = engine;
@@ -363,21 +371,30 @@ export class ScenarioRunner {
   start(scenarioId, seed = 42) {
     this.stop();
     this.seed = seed;
-    this.activeScenarioId = scenarioId;
-    this.engine.state.activeScenario = scenarioId;
+
+    let normId = scenarioId;
+    if (scenarioId === 'SCENARIO_A' || scenarioId === 'SCENARIO_A_CCTV_ALERT') normId = 'SCENARIO_A_CCTV_ALERT';
+    else if (scenarioId === 'SCENARIO_B' || scenarioId === 'SCENARIO_B_ESCAPE_INTERVENTION') normId = 'SCENARIO_B_ESCAPE_INTERVENTION';
+    else if (scenarioId === 'SCENARIO_C' || scenarioId === 'SCENARIO_C_POWER_FAILURE') normId = 'SCENARIO_C_POWER_FAILURE';
+    else if (scenarioId === 'SCENARIO_D' || scenarioId === 'SCENARIO_D_COMPROMISED_OFFICER') normId = 'SCENARIO_D_COMPROMISED_OFFICER';
+    else if (scenarioId === 'SCENARIO_E' || scenarioId === 'SCENARIO_E_CREDENTIAL_MISUSE') normId = 'SCENARIO_E_CREDENTIAL_MISUSE';
+    else if (scenarioId === 'SCENARIO_F' || scenarioId === 'SCENARIO_F_EXTERNAL_VISITOR') normId = 'SCENARIO_F_EXTERNAL_VISITOR';
+
+    this.activeScenarioId = normId;
+    this.engine.state.activeScenario = normId;
     this.engine.state.scenarioSeed = seed;
     this.engine.state.scenarioElapsedSec = 0;
     this.scenarioElapsedSec = 0;
     this.scenarioState = { seed, startedAt: new Date().toISOString() };
 
     this.engine.addRecentActivity({
-      event: `Scenario Started: ${SCENARIO_REGISTRY[scenarioId]?.title || scenarioId}`,
+      event: `Scenario Started: ${SCENARIO_REGISTRY[normId]?.title || normId}`,
       location: 'Facility Wide',
       status: 'NORMAL',
       color: 'blue'
     });
 
-    switch (scenarioId) {
+    switch (normId) {
       case 'OFFICER_ENTRY':
         this.buildAuthorizedOfficerEntry();
         break;
@@ -421,7 +438,7 @@ export class ScenarioRunner {
         this.buildScenarioFExternalVisitor();
         break;
       default:
-        console.warn('[ScenarioRunner] Unknown scenario ID:', scenarioId);
+        console.warn('[ScenarioRunner] Unknown scenario ID:', scenarioId, 'normalized as:', normId);
         break;
     }
 
@@ -679,34 +696,182 @@ export class ScenarioRunner {
 
   // --- Demonstration Scenario D: Compromised Officer & RFID Revocation ---
   buildScenarioDCompromisedOfficer() {
+    // Stage 1: Compromised officer designated
     this.scheduleStep(1, () => {
-      // Flag Officer Sterling as compromised
       const sterling = this.engine.state.people['OFC-514'];
       if (sterling) {
         sterling.availability = 'COMPROMISED';
         sterling.activity = 'Flagged: Unauthorized Movement Deviation';
       }
       this.engine.addRecentActivity({
-        event: 'INSIDER THREAT DETECTED: Officer OFC-514 Compromised Protocol Deviation',
+        event: 'INSIDER THREAT DETECTED: Officer OFC-514 Flagged for Protocol Deviation',
         location: 'Block A Corridor',
         status: 'CRITICAL',
         color: 'red'
       });
-    }, 'Officer Flagged Compromised');
+      this.engine.logSimulationEvent({
+        type: 'INSIDER_THREAT_DESIGNATED',
+        sourceEntity: { id: 'OFC-514', name: 'Lt. Michael Sterling', type: 'OFFICER' },
+        location: 'Block A Corridor',
+        outcome: 'SUCCESS',
+        details: { note: 'Stage 1: Officer OFC-514 flagged as compromised insider threat' }
+      });
+    }, '1. Officer Flagged Compromised');
 
-    this.scheduleStep(5, () => {
-      // Admin revokes RFID credential
+    // Stage 2: Approaches Cell A-102 without authorized dispatch
+    this.scheduleStep(4, () => {
+      const sterling = this.engine.state.people['OFC-514'];
+      if (sterling) {
+        sterling.activity = 'Approaching Cell A-102 without Authorized Dispatch';
+        this.engine.movePersonTo('OFC-514', 'W_A102');
+      }
+      this.engine.logSimulationEvent({
+        type: 'UNAUTHORIZED_MOVEMENT_DETECTED',
+        sourceEntity: { id: 'OFC-514', name: 'Lt. Michael Sterling', type: 'OFFICER' },
+        location: 'Cell A-102 Doorway',
+        outcome: 'SUCCESS',
+        details: { note: 'Stage 2: Compromised officer moving toward Cell A-102' }
+      });
+    }, '2. Officer Approaches Cell A-102');
+
+    // Stage 3: Tamper alert raised at administrator dashboard
+    this.scheduleStep(8, () => {
+      const incId = `INC-TAMPER-${Date.now().toString(36).toUpperCase()}`;
+      const incident = {
+        id: incId,
+        title: 'Tamper Alert: Unauthorized Officer Proximity at Cell A-102',
+        rule: 'RULE D: Insider Threat Protocol Deviation',
+        severity: 'CRITICAL',
+        location: 'Cell A-102',
+        coordinates: { x: 340, y: 140 },
+        associatedDevice: 'REED-A102',
+        associatedPerson: 'OFC-514',
+        status: 'ACTIVE',
+        acknowledgedBy: null,
+        resolvedBy: null,
+        timestamp: new Date().toISOString(),
+        evidence: [
+          'Officer OFC-514 in direct proximity to Cell A-102 with zero active dispatch orders',
+          'Access control proximity warning tripped at RFID-BLOCK-A'
+        ]
+      };
+      this.engine.state.incidents.unshift(incident);
+      this.engine.addRecentActivity({
+        event: 'CRITICAL TAMPER ALERT: Unauthorized Cell Proximity by OFC-514',
+        location: 'Cell A-102',
+        status: 'CRITICAL',
+        color: 'red'
+      });
+      this.engine.broadcastEvent('incident:created', incident);
+      this.engine.logSimulationEvent({
+        type: 'TAMPER_ALERT_RAISED',
+        sourceEntity: { id: 'OFC-514', name: 'Lt. Michael Sterling', type: 'OFFICER' },
+        location: 'Cell A-102',
+        incidentId: incId,
+        outcome: 'SUCCESS',
+        details: { note: 'Stage 3: Tamper alert active on administrator dashboard' }
+      });
+      this.engine.broadcastState();
+    }, '3. Tamper Alert Raised');
+
+    // Stage 4: Administrator revokes credential
+    this.scheduleStep(12, () => {
       this.engine.revokeOfficerCredential('OFC-514', { username: 'ADMIN', role: 'ADMIN' });
-    }, 'Admin Revokes RFID Credential');
+      this.engine.logSimulationEvent({
+        type: 'CREDENTIAL_REVOKED',
+        sourceEntity: { id: 'ADMIN', type: 'USER' },
+        targetEntity: { id: 'OFC-514', name: 'Lt. Michael Sterling', type: 'OFFICER' },
+        location: 'Central Control SOC',
+        outcome: 'SUCCESS',
+        details: { note: 'Stage 4: Administrator revoked RFID badge CARD-OFC-514' }
+      });
+    }, '4. Admin Revokes Credential');
 
-    this.scheduleStep(9, () => {
-      // Officer attempts unauthorized swipe at RFID-BLOCK-A -> REJECTED
-      this.engine.handleRfidScan({
+    // Stage 5: Administrator marks officer suspended
+    this.scheduleStep(15, () => {
+      this.engine.suspendOfficer('OFC-514', { username: 'ADMIN', role: 'ADMIN' });
+      this.engine.logSimulationEvent({
+        type: 'OFFICER_SUSPENDED',
+        sourceEntity: { id: 'ADMIN', type: 'USER' },
+        targetEntity: { id: 'OFC-514', name: 'Lt. Michael Sterling', type: 'OFFICER' },
+        location: 'Central Control SOC',
+        outcome: 'SUCCESS',
+        details: { note: 'Stage 5: Officer marked SUSPENDED in authoritative registry' }
+      });
+    }, '5. Officer Suspended');
+
+    // Stage 6: Officer attempts door open; rejected with visible failure indicator
+    this.scheduleStep(18, () => {
+      const scanRes = this.engine.handleRfidScan({
         readerId: 'RFID-BLOCK-A',
         cardId: 'CARD-OFC-514',
         user: { username: 'OFC-514', role: 'OFFICER' }
       });
-    }, 'Compromised Officer Swipe Rejected');
+      this.engine.logSimulationEvent({
+        type: 'UNAUTHORIZED_ACCESS_REJECTED',
+        sourceEntity: { id: 'OFC-514', name: 'Lt. Michael Sterling', type: 'OFFICER' },
+        location: 'Block A Entrance Reader',
+        outcome: 'BLOCKED',
+        details: { scanResult: scanRes?.result || 'DENIED', note: 'Stage 6: Solenoid remains firmly locked; swipe denied' }
+      });
+    }, '6. Access Attempt Rejected');
+
+    // Stage 7: Captain Reyes dispatched to contain officer
+    this.scheduleStep(22, () => {
+      this.engine.dispatchOfficerTask('OFC-702', {
+        commandType: 'RESPOND_DOOR_ALARM',
+        targetWaypointId: 'W_A102',
+        note: 'Contain and detain suspended officer OFC-514 at Cell A-102'
+      });
+      this.engine.logSimulationEvent({
+        type: 'CONTAINMENT_DISPATCHED',
+        sourceEntity: { id: 'OFC-702', name: 'Capt. John Reyes', type: 'OFFICER' },
+        targetEntity: { id: 'OFC-514', name: 'Lt. Michael Sterling', type: 'OFFICER' },
+        location: 'East Perimeter to Block A',
+        outcome: 'SUCCESS',
+        details: { note: 'Stage 7: Capt. Reyes responding to detain suspended officer' }
+      });
+    }, '7. Reyes Dispatched to Contain');
+
+    // Stage 8: Reyes detains compromised officer; state transitions to SUSPENDED, escorted out
+    this.scheduleStep(28, () => {
+      const sterling = this.engine.state.people['OFC-514'];
+      const reyes = this.engine.state.people['OFC-702'];
+      if (sterling) {
+        sterling.officerState = 'SUSPENDED';
+        sterling.activity = 'Detained & Escorted by Capt. Reyes to SOC Holding';
+        this.engine.movePersonTo('OFC-514', 'W_CONTROL_1');
+      }
+      if (reyes) {
+        reyes.officerState = 'ESCORTING_PRISONER';
+        reyes.activity = 'Escorting Suspended Officer OFC-514 to SOC Holding';
+        reyes.messageBubble = {
+          text: 'Central, OFC-514 detained and disarmed. Escorting to SOC holding bay.',
+          expiresAt: Date.now() + 8000,
+          type: 'RADIO'
+        };
+        this.engine.movePersonTo('OFC-702', 'W_CONTROL_1');
+      }
+
+      this.engine.addRecentActivity({
+        event: 'RESOLVED: Compromised Officer OFC-514 Detained by Capt. Reyes',
+        location: 'Control Room SOC',
+        status: 'NORMAL',
+        color: 'green'
+      });
+
+      this.engine.logSimulationEvent({
+        type: 'INSIDER_THREAT_CONTAINED',
+        sourceEntity: { id: 'OFC-702', name: 'Capt. John Reyes', type: 'OFFICER' },
+        targetEntity: { id: 'OFC-514', name: 'Lt. Michael Sterling', type: 'OFFICER' },
+        location: 'Control Room SOC',
+        previousState: 'COMPROMISED',
+        newState: 'SUSPENDED',
+        outcome: 'SUCCESS',
+        details: { note: 'Stage 8: Compromised officer fully contained and disarmed; scenario resolved.' }
+      });
+      this.engine.broadcastState();
+    }, '8. Reyes Detains Compromised Officer');
   }
 
   // --- Demonstration Scenario E: Credential Misuse & Inmate Containment ---

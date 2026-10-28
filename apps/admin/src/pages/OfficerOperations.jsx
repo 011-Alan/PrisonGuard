@@ -22,41 +22,51 @@ import { useSocket } from '../context/SocketContext';
 import { SIMULATOR_URL } from '../config';
 
 const COMMAND_TYPES = [
-  { id: 'PATROL_ZONE', label: '1. Patrol Designated Zone', defaultTarget: 'W_CORRIDOR_MAIN' },
-  { id: 'ESCORT_PRISONER', label: '2. Escort Inmate', defaultTarget: 'W_MED_TREATMENT' },
-  { id: 'INTERCEPT_INMATE', label: '3. Intercept Fleeing Inmate', defaultTarget: 'W_PERIM_NE' },
-  { id: 'RESPOND_TO_BREACH', label: '4. Respond to Security Breach', defaultTarget: 'W_YARD_GATE' },
-  { id: 'CONDUCT_CELL_INSPECTION', label: '5. Conduct Cell Inspection', defaultTarget: 'W_CELL_01' },
-  { id: 'MONITOR_RECREATION_YARD', label: '6. Monitor Recreation Yard', defaultTarget: 'W_YARD_CENTER' },
-  { id: 'SECURE_GATE', label: '7. Secure Perimeter Gate', defaultTarget: 'W_SALLY_BAY' },
-  { id: 'LOCKDOWN_BLOCK', label: '8. Enforce Cell Block Lockdown', defaultTarget: 'W_CORRIDOR_NORTH' },
-  { id: 'ASSIST_MEDICAL', label: '9. Assist Medical Emergency', defaultTarget: 'W_MED_WARD' },
-  { id: 'RELIEVE_POST', label: '10. Relieve Security Post', defaultTarget: 'W_ADMIN_SOC' },
-  { id: 'STAND_BY', label: '11. Tactical Stand By', defaultTarget: 'W_CORRIDOR_MAIN' },
-  { id: 'REPORT_STATUS', label: '12. Report Operational Status', defaultTarget: 'W_ADMIN_SOC' }
+  { id: 'PATROL_ZONE', label: '1. Patrol Designated Zone', defaultTarget: 'W_NORTH_A' },
+  { id: 'ESCORT_PRISONER', label: '2. Escort Inmate', defaultTarget: 'W_MED_1' },
+  { id: 'INTERCEPT_INMATE', label: '3. Intercept Fleeing Inmate', defaultTarget: 'W_PERIM_EAST_N' },
+  { id: 'RESPOND_DOOR_ALARM', label: '4. Respond to Door Alarm', defaultTarget: 'W_A_CORR_2' },
+  { id: 'INSPECT_CELL', label: '5. Conduct Cell Inspection', defaultTarget: 'W_A102' },
+  { id: 'MONITOR_PRISONER', label: '6. Monitor Suspicious Inmate', defaultTarget: 'W_YARD_1' },
+  { id: 'INSPECT_CORRIDOR', label: '7. Inspect Cell Corridor', defaultTarget: 'W_NORTH_B' },
+  { id: 'REPORT_MEDICAL', label: '8. Report to Medical Clinic', defaultTarget: 'W_MED_1' },
+  { id: 'RETURN_POST', label: '9. Return to Duty Post', defaultTarget: 'W_NORTH_A' },
+  { id: 'STATUS_REPORT', label: '10. Report Status to SOC', defaultTarget: 'W_CONTROL_1' }
 ];
 
 const TARGET_WAYPOINTS = [
-  { id: 'W_CORRIDOR_MAIN', label: 'Main Central Corridor' },
-  { id: 'W_CORRIDOR_NORTH', label: 'North Cell Corridor' },
-  { id: 'W_CELL_01', label: 'Cell Block 01' },
-  { id: 'W_CELL_02', label: 'Cell Block 02' },
-  { id: 'W_CELL_03', label: 'Cell Block 03' },
-  { id: 'W_YARD_CENTER', label: 'Recreation Yard (Center)' },
-  { id: 'W_YARD_GATE', label: 'Recreation Yard Security Gate' },
-  { id: 'W_SALLY_BAY', label: 'Sally Port Vehicle Bay' },
-  { id: 'W_MED_WARD', label: 'Medical Ward' },
-  { id: 'W_MED_TREATMENT', label: 'Medical Treatment Examination' },
-  { id: 'W_ADMIN_SOC', label: 'Central Security SOC' },
-  { id: 'W_PERIM_NE', label: 'Perimeter Northeast Sector' },
-  { id: 'W_PERIM_GATE_OUT', label: 'Perimeter Outer Gate' }
+  { id: 'W_NORTH_A', label: 'North Main Corridor (Block A)' },
+  { id: 'W_NORTH_B', label: 'North Main Corridor (Block B)' },
+  { id: 'W_NORTH_C', label: 'North Main Corridor (Block C)' },
+  { id: 'W_A_CORR_2', label: 'Block A Corridor' },
+  { id: 'W_B_CORR_2', label: 'Block B Corridor' },
+  { id: 'W_C_CORR_2', label: 'Block C Corridor' },
+  { id: 'W_A102', label: 'Cell A-102 Doorway' },
+  { id: 'W_B102', label: 'Cell B-102 Doorway' },
+  { id: 'W_C101', label: 'Cell C-101 Doorway' },
+  { id: 'W_YARD_1', label: 'Common Exercise Yard' },
+  { id: 'W_YARD_GATE', label: 'Recreation Yard Gate' },
+  { id: 'W_SALLY_BAY', label: 'Sally Port Inspection Bay' },
+  { id: 'W_MED_ENTRY', label: 'Medical Ward Checkpoint' },
+  { id: 'W_MED_1', label: 'Medical Ward Clinic / Triage' },
+  { id: 'W_CONTROL_1', label: 'Central Security SOC' },
+  { id: 'W_PERIM_EAST_N', label: 'East Perimeter Fence Post' },
+  { id: 'W_PERIM_SOUTH_MID', label: 'South Perimeter Checkpoint' }
 ];
 
 export default function OfficerOperations() {
-  const { state, dispatchOfficerTask, revokeOfficerCredential, applyHealthChange } = useSocket();
-  const [selectedOfficerId, setSelectedOfficerId] = useState('OFF-201');
+  const {
+    state,
+    dispatchOfficerTask,
+    revokeOfficerCredential,
+    suspendOfficer,
+    triggerPrisonerOfficerConflict,
+    assignMedicalEscort,
+    applyHealthChange
+  } = useSocket();
+  const [selectedOfficerId, setSelectedOfficerId] = useState('OFC-514');
   const [commandType, setCommandType] = useState('PATROL_ZONE');
-  const [targetWaypointId, setTargetWaypointId] = useState('W_CORRIDOR_MAIN');
+  const [targetWaypointId, setTargetWaypointId] = useState('W_NORTH_A');
   const [priority, setPriority] = useState('ROUTINE');
   const [note, setNote] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -113,6 +123,34 @@ export default function OfficerOperations() {
     try {
       await applyHealthChange(officerId, delta, reason);
       setActionFeedback({ type: 'success', message: `Health update applied to ${officerId} (${delta > 0 ? '+' : ''}${delta} HP: ${reason})` });
+    } catch (err) {
+      setActionFeedback({ type: 'error', message: err.message });
+    }
+  };
+
+  const handleSuspendOfficer = async (officerId) => {
+    if (!confirm(`Confirm administrative suspension of officer ${officerId}? Their RFID badge will be revoked and they will be restricted from duty.`)) return;
+    try {
+      await suspendOfficer(officerId);
+      setActionFeedback({ type: 'success', message: `Officer ${officerId} SUSPENDED from duty. Credentials revoked.` });
+    } catch (err) {
+      setActionFeedback({ type: 'error', message: err.message });
+    }
+  };
+
+  const handleSimulateConflict = async (officerId) => {
+    try {
+      await triggerPrisonerOfficerConflict({ prisonerId: 'P-1044', officerId });
+      setActionFeedback({ type: 'success', message: `Physical altercation simulated with Marcus Vance (P-1044). Officer health reduced by 30 HP.` });
+    } catch (err) {
+      setActionFeedback({ type: 'error', message: err.message });
+    }
+  };
+
+  const handleAssignMedicalEscort = async (escortId) => {
+    try {
+      await assignMedicalEscort({ patientId: 'P-1044', escortStaffId: escortId });
+      setActionFeedback({ type: 'success', message: `Medical escort detail assigned to ${escortId} for patient P-1044.` });
     } catch (err) {
       setActionFeedback({ type: 'error', message: err.message });
     }
@@ -439,7 +477,15 @@ export default function OfficerOperations() {
                     className="flex-1 py-2 px-3 bg-red-950/70 hover:bg-red-900 border border-red-500/50 text-red-300 rounded-xl font-bold text-xs transition flex items-center justify-center gap-1.5"
                   >
                     <Ban className="w-3.5 h-3.5 text-red-400" />
-                    <span>Revoke RFID Access</span>
+                    <span>Revoke RFID</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleSuspendOfficer(selectedOfficer.id)}
+                    className="flex-1 py-2 px-3 bg-orange-950/70 hover:bg-orange-900 border border-orange-500/50 text-orange-300 rounded-xl font-bold text-xs transition flex items-center justify-center gap-1.5"
+                  >
+                    <Shield className="w-3.5 h-3.5 text-orange-400" />
+                    <span>Suspend Duty</span>
                   </button>
 
                   <button
@@ -456,6 +502,24 @@ export default function OfficerOperations() {
                     title="Restore +40 HP via medical triage"
                   >
                     +40 HP
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2 pt-2">
+                  <button
+                    onClick={() => handleSimulateConflict(selectedOfficer.id)}
+                    className="flex-1 py-1.5 px-3 bg-purple-950/60 hover:bg-purple-900 border border-purple-500/40 text-purple-300 rounded-xl font-semibold text-xs transition flex items-center justify-center gap-1.5"
+                  >
+                    <AlertTriangle className="w-3.5 h-3.5 text-purple-400" />
+                    <span>Simulate Altercation</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleAssignMedicalEscort(selectedOfficer.id)}
+                    className="flex-1 py-1.5 px-3 bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-300 rounded-xl font-semibold text-xs transition flex items-center justify-center gap-1.5"
+                  >
+                    <HeartPulse className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Medical Escort</span>
                   </button>
                 </div>
               </div>

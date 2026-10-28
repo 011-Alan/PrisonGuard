@@ -332,6 +332,33 @@ export function SocketProvider({ children }) {
     });
   };
 
+  const suspendOfficer = async (officerId) => {
+    return authFetch(`/api/officers/${officerId}/suspend`, {
+      method: 'POST'
+    });
+  };
+
+  const triggerPrisonerOfficerConflict = async (data = {}) => {
+    return authFetch('/api/conflicts/prisoner-officer', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  };
+
+  const triggerPrisonerConflict = async (data = {}) => {
+    return authFetch('/api/conflicts/prisoner-prisoner', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  };
+
+  const assignMedicalEscort = async (data = {}) => {
+    return authFetch('/api/medical/escort', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  };
+
   const handleVisitorDecision = async (visitorId, decision) => {
     return authFetch(`/api/visitors/${visitorId}/decision`, {
       method: 'POST',
@@ -415,6 +442,10 @@ export function SocketProvider({ children }) {
         dispatchOfficerTask,
         triggerOfficerMedical,
         revokeOfficerCredential,
+        suspendOfficer,
+        triggerPrisonerOfficerConflict,
+        triggerPrisonerConflict,
+        assignMedicalEscort,
         handleVisitorDecision,
         triggerSuspiciousActivity,
         applyHealthChange,

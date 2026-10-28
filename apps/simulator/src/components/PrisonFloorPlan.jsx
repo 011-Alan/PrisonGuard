@@ -82,6 +82,47 @@ export default function PrisonFloorPlan({
     isDraggingRef.current = false;
   };
 
+  // Smooth 60fps Personnel Position Lerping (Continuous Navigation Gliding)
+  const [smoothCoords, setSmoothCoords] = useState({});
+  const coordsRef = useRef({});
+
+  useEffect(() => {
+    let animId;
+    const animate = () => {
+      const currentPeople = state?.people ? Object.values(state.people) : [];
+      let changed = false;
+      const updated = { ...coordsRef.current };
+
+      for (const p of currentPeople) {
+        if (!updated[p.id]) {
+          updated[p.id] = { x: p.x, y: p.y };
+          changed = true;
+        } else {
+          const dx = p.x - updated[p.id].x;
+          const dy = p.y - updated[p.id].y;
+          if (Math.abs(dx) > 0.2 || Math.abs(dy) > 0.2) {
+            updated[p.id].x += dx * 0.18;
+            updated[p.id].y += dy * 0.18;
+            changed = true;
+          } else if (updated[p.id].x !== p.x || updated[p.id].y !== p.y) {
+            updated[p.id].x = p.x;
+            updated[p.id].y = p.y;
+            changed = true;
+          }
+        }
+      }
+
+      if (changed) {
+        coordsRef.current = updated;
+        setSmoothCoords({ ...updated });
+      }
+      animId = requestAnimationFrame(animate);
+    };
+
+    animId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animId);
+  }, [state?.people]);
+
   // Follow Person Camera tracking
   useEffect(() => {
     if (isFollowing && selectedPerson && state?.people?.[selectedPerson.id]) {
@@ -931,12 +972,21 @@ export default function PrisonFloorPlan({
           const isMedical = isDoctor || isNurse;
           const isSelected = selectedPerson?.id === person.id;
           const isMoving = person.status === 'IN_TRANSIT';
+          const isSuspended = person.officerState === 'SUSPENDED' || person.credentialStatus === 'SUSPENDED';
+
+          // Continuous interpolated positions
+          const px = smoothCoords[person.id]?.x ?? person.x;
+          const py = smoothCoords[person.id]?.y ?? person.y;
 
           // Color & Beacon initial config
           let beaconStroke = '#f59e0b';
           let beaconFill = '#d97706';
           let beaconInitial = 'P';
-          if (isOfficer) {
+          if (isSuspended) {
+            beaconStroke = '#ef4444';
+            beaconFill = '#991b1b';
+            beaconInitial = 'SUSP';
+          } else if (isOfficer) {
             beaconStroke = '#3b82f6';
             beaconFill = '#2563eb';
             beaconInitial = 'G';
@@ -952,6 +1002,14 @@ export default function PrisonFloorPlan({
             beaconStroke = '#14b8a6';
             beaconFill = '#0d9488';
             beaconInitial = 'RN';
+          } else if (person.prisonerState === 'INVOLVED_IN_CONFLICT') {
+            beaconStroke = '#dc2626';
+            beaconFill = '#b91c1c';
+            beaconInitial = 'CFLT';
+          } else if (person.prisonerState === 'INJURED' || person.prisonerState === 'AWAITING_MEDICAL_ESCORT') {
+            beaconStroke = '#f97316';
+            beaconFill = '#ea580c';
+            beaconInitial = 'INJ';
           }
 
           return (
@@ -965,19 +1023,20 @@ export default function PrisonFloorPlan({
             >
               {/* Outer pulsing beacon ring */}
               <circle
-                cx={person.x}
-                cy={person.y}
+                cx={px}
+                cy={py}
                 r={isSelected ? "20" : "14"}
                 fill="none"
                 stroke={beaconStroke}
                 strokeWidth={isSelected ? "2.5" : "1.2"}
+                strokeDasharray={isSuspended ? "4,2" : undefined}
                 className={isMoving ? "animate-ping opacity-60" : "animate-pulse"}
               />
 
               {/* Central Marker */}
               <circle
-                cx={person.x}
-                cy={person.y}
+                cx={px}
+                cy={py}
                 r="9"
                 fill={beaconFill}
                 stroke="#ffffff"
@@ -986,10 +1045,10 @@ export default function PrisonFloorPlan({
 
               {/* Mini Role Initial */}
               <text
-                x={person.x}
-                y={person.y + 3}
+                x={px}
+                y={py + 3}
                 fill="#ffffff"
-                fontSize={beaconInitial.length > 1 ? "6.5" : "8"}
+                fontSize={beaconInitial.length > 2 ? "5.5" : beaconInitial.length > 1 ? "6.5" : "8"}
                 fontWeight="extrabold"
                 textAnchor="middle"
                 pointerEvents="none"
@@ -1002,8 +1061,8 @@ export default function PrisonFloorPlan({
                 <g pointerEvents="none">
                   {/* Health Bar Background Track */}
                   <rect
-                    x={person.x - 14}
-                    y={person.y - 17}
+                    x={px - 14}
+                    y={py - 17}
                     width="28"
                     height="3.5"
                     rx="1"
@@ -1013,8 +1072,8 @@ export default function PrisonFloorPlan({
                   />
                   {/* Health Bar Fill */}
                   <rect
-                    x={person.x - 14}
-                    y={person.y - 17}
+                    x={px - 14}
+                    y={py - 17}
                     width={Math.max(2, (28 * Math.max(0, Math.min(100, person.health ?? 100))) / 100)}
                     height="3.5"
                     rx="1"
@@ -1033,8 +1092,8 @@ export default function PrisonFloorPlan({
               {person.healthState === 'INCAPACITATED' && (
                 <g className="animate-pulse">
                   <rect
-                    x={person.x - 45}
-                    y={person.y - 32}
+                    x={px - 45}
+                    y={py - 32}
                     width="90"
                     height="13"
                     rx="3"
@@ -1043,8 +1102,8 @@ export default function PrisonFloorPlan({
                     strokeWidth="1"
                   />
                   <text
-                    x={person.x}
-                    y={person.y - 23}
+                    x={px}
+                    y={py - 23}
                     fill="#fecaca"
                     fontSize="7"
                     fontWeight="extrabold"
@@ -1059,8 +1118,8 @@ export default function PrisonFloorPlan({
               {displaySettings?.showPeopleLabels !== false && (
                 <>
                   <rect
-                    x={person.x - 32}
-                    y={person.y + 12}
+                    x={px - 32}
+                    y={py + 12}
                     width="64"
                     height="15"
                     rx="3"
@@ -1070,8 +1129,8 @@ export default function PrisonFloorPlan({
                     opacity="0.9"
                   />
                   <text
-                    x={person.x}
-                    y={person.y + 23}
+                    x={px}
+                    y={py + 23}
                     fill="#ffffff"
                     fontSize="8"
                     fontWeight="bold"
@@ -1087,8 +1146,8 @@ export default function PrisonFloorPlan({
               {displaySettings?.showSpeechBubbles !== false && person.messageBubble && person.messageBubble.text && (
                 <g className="animate-bounce" style={{ animationDuration: '2.5s' }}>
                   <rect
-                    x={person.x - 90}
-                    y={person.y - 42}
+                    x={px - 90}
+                    y={py - 42}
                     width="180"
                     height="22"
                     rx="5"
@@ -1098,12 +1157,12 @@ export default function PrisonFloorPlan({
                     opacity="0.95"
                   />
                   <polygon
-                    points={`${person.x - 5},${person.y - 20} ${person.x + 5},${person.y - 20} ${person.x},${person.y - 14}`}
+                    points={`${px - 5},${py - 20} ${px + 5},${py - 20} ${px},${py - 14}`}
                     fill="#06b6d4"
                   />
                   <text
-                    x={person.x}
-                    y={person.y - 28}
+                    x={px}
+                    y={py - 28}
                     fill="#38bdf8"
                     fontSize="7.5"
                     fontWeight="bold"
@@ -1119,8 +1178,8 @@ export default function PrisonFloorPlan({
               {person.rfidBadgeAction && (
                 <g className="animate-pulse">
                   <rect
-                    x={person.x - 70}
-                    y={person.y - 38}
+                    x={px - 70}
+                    y={py - 38}
                     width="140"
                     height="20"
                     rx="4"
@@ -1130,8 +1189,8 @@ export default function PrisonFloorPlan({
                     opacity="0.95"
                   />
                   <text
-                    x={person.x}
-                    y={person.y - 25}
+                    x={px}
+                    y={py - 25}
                     fill="#6ee7b7"
                     fontSize="7.5"
                     fontWeight="extrabold"
@@ -1142,19 +1201,46 @@ export default function PrisonFloorPlan({
                 </g>
               )}
 
+              {/* Suspended Officer Badge */}
+              {isSuspended && (
+                <g className="animate-pulse">
+                  <rect
+                    x={px - 40}
+                    y={py + 29}
+                    width="80"
+                    height="13"
+                    rx="3"
+                    fill="#7f1d1d"
+                    stroke="#ef4444"
+                    strokeWidth="1"
+                  />
+                  <text
+                    x={px}
+                    y={py + 38}
+                    fill="#fecaca"
+                    fontSize="6.5"
+                    fontWeight="extrabold"
+                    textAnchor="middle"
+                    pointerEvents="none"
+                  >
+                    SUSPENDED
+                  </text>
+                </g>
+              )}
+
               {/* Officer Dynamic State Badge */}
-              {isOfficer && person.officerState && person.officerState !== 'PATROLLING' && (
+              {isOfficer && !isSuspended && person.officerState && person.officerState !== 'PATROLLING' && (
                 <g>
                   <rect
-                    x={person.x - 42}
-                    y={person.y + 29}
+                    x={px - 42}
+                    y={py + 29}
                     width="84"
                     height="13"
                     rx="3"
                     fill={
                       person.officerState === 'INTERCEPTING'
                         ? '#dc2626'
-                        : person.officerState === 'ESCORTING'
+                        : person.officerState === 'ESCORTING' || person.officerState === 'ESCORTING_PRISONER' || person.officerState === 'ESCORTING_INJURED_PERSON'
                         ? '#d97706'
                         : person.officerState === 'REQUESTING_ACCESS'
                         ? '#0284c7'
@@ -1167,10 +1253,10 @@ export default function PrisonFloorPlan({
                     opacity="0.95"
                   />
                   <text
-                    x={person.x}
-                    y={person.y + 38}
+                    x={px}
+                    y={py + 38}
                     fill="#ffffff"
-                    fontSize="6.5"
+                    fontSize="6"
                     fontWeight="bold"
                     textAnchor="middle"
                     pointerEvents="none"
@@ -1184,16 +1270,16 @@ export default function PrisonFloorPlan({
               {person.status === 'ESCAPING' && (
                 <g className="animate-pulse">
                   <rect
-                    x={person.x - 36}
-                    y={person.y + 29}
+                    x={px - 36}
+                    y={py + 29}
                     width="72"
                     height="13"
                     rx="3"
                     fill="#dc2626"
                   />
                   <text
-                    x={person.x}
-                    y={person.y + 38}
+                    x={px}
+                    y={py + 38}
                     fill="#ffffff"
                     fontSize="7"
                     fontWeight="extrabold"

@@ -345,16 +345,7 @@ export function createApiRouter(engine) {
   });
 
   // Scenarios Control
-  const ALLOWED_SCENARIOS = [
-    'OFFICER_ENTRY',
-    'UNAUTHORIZED_ACCESS',
-    'DOOR_BREACH',
-    'PERIMETER_ESCAPE',
-    'GATE_FAILURE',
-    'CONTROLLER_DISCONNECT',
-    'MEDICAL_DURESS',
-    'SECURITY_INCIDENT_RESPONSE'
-  ];
+  const ALLOWED_SCENARIOS = Object.keys(SCENARIO_REGISTRY);
 
   router.post('/scenarios/start', (req, res) => {
     const { scenarioId } = req.body || {};
@@ -637,6 +628,57 @@ export function createApiRouter(engine) {
     try {
       engine.startMassEscapeScenario();
       res.json({ success: true, message: 'Mass escape scenario initiated across multiple sectors' });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Simulation Event Timeline
+  router.get(['/events', '/simulation/events'], (req, res) => {
+    const limit = Math.min(parseInt(req.query.limit || '100', 10), 200);
+    const events = (engine.state.eventTimeline || []).slice(0, limit);
+    res.json({ total: events.length, events });
+  });
+
+  // Conflicts Simulation Endpoints
+  router.post('/conflicts/prisoner-officer', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      const result = engine.triggerPrisonerOfficerConflict(req.body);
+      res.json({ success: true, ...result });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  router.post('/conflicts/prisoner-prisoner', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      const result = engine.triggerPrisonerConflict(req.body);
+      res.json({ success: true, ...result });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Medical Escort Dispatch Endpoint
+  router.post('/medical/escort', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      const { patientId, escortStaffId } = req.body || {};
+      if (!patientId) {
+        return res.status(400).json({ error: 'patientId is required' });
+      }
+      const result = engine.assignMedicalEscort({ patientId, escortStaffId, user: req.user });
+      res.json({ success: true, ...result });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Officer Suspension Endpoint
+  router.post('/officers/:id/suspend', authenticate, authorize(['OPERATOR', 'SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      const { id } = req.params;
+      const officer = engine.suspendOfficer(id, req.user);
+      res.json({ success: true, officer });
     } catch (err) {
       res.status(400).json({ error: err.message });
     }

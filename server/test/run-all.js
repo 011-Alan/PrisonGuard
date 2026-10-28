@@ -2,6 +2,7 @@ import http from 'http';
 import { app, server, engine } from '../src/index.js';
 import { auditLogger } from '../src/utils/audit.js';
 import { db } from '../src/storage/db.js';
+import { findShortestPath } from '../src/simulation/waypoints.js';
 
 let passed = 0;
 let failed = 0;
@@ -452,7 +453,7 @@ async function runTests() {
       })
     });
     assert(taskRes.status === 200, 'Admin-to-officer command accepted with HTTP 200');
-    assert(engine.state.people['OFC-514'].officerState === 'RESPONDING_TO_ADMIN_COMMAND', 'Officer transitions to RESPONDING_TO_ADMIN_COMMAND');
+    assert(engine.state.people['OFC-514'].officerState === 'MOVING_TO_ASSIGNMENT' || engine.state.people['OFC-514'].officerState === 'RESPONDING_TO_ADMIN_COMMAND', 'Officer transitions to MOVING_TO_ASSIGNMENT');
     assert(Boolean(engine.state.people['OFC-514'].messageBubble?.text.includes('North Main Corridor')), 'Officer simulated radio response dispatched');
 
     // 19. Officer Incapacitation & Medical Recovery (Section 4.2 & Section 10)
@@ -674,6 +675,212 @@ async function runTests() {
     assert(Object.keys(topoRes.data?.accessPoints || {}).length >= 5, '5 facility Wi-Fi Access Points configured');
     assert(topoRes.data?.metadata?.backend?.port === 5000, 'Backend metadata reports Port 5000');
     assert(topoRes.data?.accessPoints['AP-NORTH-CORR']?.associatedControllers?.includes('ESP32-CELL-01'), 'AP associations accurate');
+
+    // 31. Test A: Cell Door & Prisoner Exit Logic
+    console.log('\n[SUITE 31: Test A – Cell Door & Prisoner Exit Logic]');
+    engine.resetToInitial();
+    // Inmate in cell
+    assert(engine.state.people['P-1044'].prisonerState === 'INSIDE_CELL', 'Marcus Vance initially INSIDE_CELL');
+    // Open cell door with officer inspecting: inmate should hold
+    engine.state.people['OFC-514'].officerState = 'INSPECTING_CELL';
+    engine.evaluateDoorOpeningReactions('DOOR-A102');
+    assert(engine.state.people['P-1044'].prisonerState === 'INSIDE_CELL', 'Inmate remains INSIDE_CELL during officer inspection');
+    engine.state.people['OFC-514'].officerState = 'PATROLLING';
+
+    // Open cell door with routine schedule: inmate steps out for recreation
+    engine.state.simulationClock.currentPhase = { id: 'YARD_RECREATION', name: 'Yard Recreation' };
+    engine.evaluateDoorOpeningReactions('DOOR-A102');
+    assert(engine.state.people['P-1044'].prisonerState === 'MOVING_TO_DESTINATION', 'Inmate transitions to MOVING_TO_DESTINATION on routine release');
+    assert(engine.state.eventTimeline.some(e => e.type === 'PRISONER_EXITED_CELL' && e.details?.reason === 'ROUTINE_SCHEDULE'), 'PRISONER_EXITED_CELL event logged for routine schedule');
+
+    // Unauthorized cell door open: inmate attempts escape
+    engine.state.simulationClock.currentPhase = { id: 'MORNING_ROUTINE', name: 'Morning Routine' };
+    engine.state.people['P-1044'].prisonerState = 'INSIDE_CELL';
+    engine.state.people['P-1044'].status = 'NORMAL';
+    engine.evaluateDoorOpeningReactions('DOOR-A102');
+    assert(engine.state.people['P-1044'].prisonerState === 'ATTEMPTING_ESCAPE', 'Inmate transitions to ATTEMPTING_ESCAPE on unauthorized open');
+    assert(engine.state.people['P-1044'].status === 'ESCAPING', 'Inmate status is ESCAPING');
+
+    // Door closed before inmate crosses doorway: exit blocked, inmate reverts to INSIDE_CELL
+    engine.state.people['P-1044'].currentWaypoint = 'W_A102';
+    engine.evaluateDoorClosingReactions('DOOR-A102');
+    assert(engine.state.people['P-1044'].prisonerState === 'INSIDE_CELL', 'Inmate reverts to INSIDE_CELL when door closes before crossing');
+    assert(engine.state.people['P-1044'].status === 'NORMAL', 'Inmate status restored to NORMAL');
+    assert(engine.state.eventTimeline.some(e => e.type === 'EXIT_BLOCKED_DOOR_CLOSED'), 'EXIT_BLOCKED_DOOR_CLOSED event logged');
+
+    // 32. Test B: Officer Command Integrity & Destination Stability
+    console.log('\n[SUITE 32: Test B – Officer Command Integrity & Destination Stability]');
+    engine.resetToInitial();
+    const sterling = engine.state.people['OFC-514'];
+    const task = engine.dispatchOfficerTask('OFC-514', {
+      commandType: 'MONITOR_PRISONER',
+      targetWaypointId: 'W_YARD_1',
+      note: 'Monitor common yard activity'
+    });
+    assert(sterling.officerState === 'MOVING_TO_ASSIGNMENT', 'Officer state is MOVING_TO_ASSIGNMENT');
+    assert(sterling.currentAssignment !== null, 'Officer has active currentAssignment');
+    assert(sterling.path.length > 0, 'Officer assigned valid navigation path');
+
+    // Verify autonomous patrol does NOT overwrite active assignment
+    const assignedPathLength = sterling.path.length;
+    engine.stepAutonomousPatrols();
+    assert(sterling.currentAssignment !== null, 'Autonomous patrol does NOT clear current assignment');
+    assert(sterling.path.length === assignedPathLength, 'Autonomous patrol does NOT overwrite path');
+
+    // Complete task: move officer to destination waypoint and tick
+    sterling.currentWaypoint = 'W_YARD_1';
+    sterling.path = [];
+    engine.processAutonomousStaffAndPrisoners(new Date().toISOString());
+    assert(sterling.officerState === 'MONITORING_PRISONER', 'Officer transitions to MONITORING_PRISONER upon arrival');
+    assert(task.status === 'COMPLETED', 'Admin task marked COMPLETED');
+    assert(engine.state.eventTimeline.some(e => e.type === 'OFFICER_ARRIVED'), 'OFFICER_ARRIVED event logged');
+
+    // 33. Test C: Non-Graphic Conflicts & Single-Time Health Drop
+    console.log('\n[SUITE 33: Test C – Scripted Non-Graphic Conflicts & Health Model]');
+    engine.resetToInitial();
+    const conflictRes = await request('/api/conflicts/prisoner-officer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ prisonerId: 'P-1044', officerId: 'OFC-514', severity: 'HIGH' })
+    });
+    assert(conflictRes.status === 200, 'Prisoner-Officer conflict endpoint succeeds');
+    assert(engine.state.people['OFC-514'].health === 70, 'Officer health dropped by exactly 30 HP once (from 100 to 70)');
+    assert(engine.state.people['OFC-514'].officerState === 'INCAPACITATED', 'Officer state transitions to INCAPACITATED');
+    assert(engine.state.people['P-1044'].prisonerState === 'INVOLVED_IN_CONFLICT', 'Prisoner state transitions to INVOLVED_IN_CONFLICT');
+    assert(engine.state.incidents.some(i => i.rule?.includes('RULE H')), 'Staff assault incident created');
+
+    // Multiple tick passes must NOT reduce health further (damage applied ONCE)
+    engine.processAutonomousStaffAndPrisoners(new Date().toISOString());
+    engine.processAutonomousStaffAndPrisoners(new Date().toISOString());
+    assert(engine.state.people['OFC-514'].health === 70, 'Health remains stable at 70 across subsequent ticks (no continuous drain)');
+
+    // Inmate-Inmate Conflict
+    const inmateConflictRes = await request('/api/conflicts/prisoner-prisoner', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ prisoner1Id: 'P-1044', prisoner2Id: 'P-2089', severity: 'MEDIUM' })
+    });
+    assert(inmateConflictRes.status === 200, 'Prisoner-Prisoner conflict endpoint succeeds');
+    assert(engine.state.people['P-1044'].health === 75, 'Injured prisoner takes exactly -25 damage once (100 to 75)');
+    assert(engine.state.people['P-1044'].prisonerState === 'INJURED', 'Injured prisoner transitions to INJURED');
+
+    // 34. Test D: Medical Escort & Gradual Simulation-Time Recovery
+    console.log('\n[SUITE 34: Test D – Medical Escort & Gradual Simulation-Time Recovery]');
+    const medEscortRes = await request('/api/medical/escort', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ patientId: 'P-1044', escortStaffId: 'NRS-402' })
+    });
+    assert(medEscortRes.status === 200, 'Medical escort dispatch succeeds');
+    assert(engine.state.people['P-1044'].prisonerState === 'AWAITING_MEDICAL_ESCORT', 'Patient enters AWAITING_MEDICAL_ESCORT');
+    assert(engine.state.people['NRS-402'].officerState === 'ESCORTING_INJURED_PERSON', 'Staff enters ESCORTING_INJURED_PERSON');
+
+    // Meet and escort to Medical Bay
+    engine.state.people['NRS-402'].currentWaypoint = engine.state.people['P-1044'].currentWaypoint;
+    engine.processAutonomousStaffAndPrisoners(new Date().toISOString());
+    assert(engine.state.people['P-1044'].prisonerState === 'BEING_ESCORTED_TO_MEDICAL', 'Patient transitions to BEING_ESCORTED_TO_MEDICAL');
+
+    // Arrive at Clinic
+    engine.state.people['NRS-402'].currentWaypoint = 'W_MED_1';
+    engine.state.people['NRS-402'].path = [];
+    engine.processAutonomousStaffAndPrisoners(new Date().toISOString());
+    assert(engine.state.people['P-1044'].prisonerState === 'RECEIVING_MEDICAL_CARE' || engine.state.people['P-1044'].prisonerState === 'RECOVERING', 'Patient admitted to clinic (RECEIVING_MEDICAL_CARE / RECOVERING)');
+
+    // Recovery test: paused simulation freezes recovery
+    engine.state.simulationClock.isPaused = true;
+    const prePauseHp = engine.state.people['P-1044'].health;
+    engine.processAutonomousStaffAndPrisoners(new Date().toISOString());
+    assert(engine.state.people['P-1044'].health === prePauseHp, 'Paused simulation clock freezes medical recovery');
+
+    // Unpause: +5 HP per tick at 1x speed
+    engine.state.simulationClock.isPaused = false;
+    engine.state.simulationClock.speed = 1;
+    engine.processAutonomousStaffAndPrisoners(new Date().toISOString());
+    assert(engine.state.people['P-1044'].health === prePauseHp + 5, 'Health recovers gradually by +5 HP per simulation second');
+
+    // Reach 100 HP: full recovery and discharge
+    engine.state.people['P-1044'].health = 96;
+    engine.processAutonomousStaffAndPrisoners(new Date().toISOString());
+    assert(engine.state.people['P-1044'].health === 100, 'Patient health restored to 100 HP');
+    assert(engine.state.people['P-1044'].healthState === 'HEALTHY', 'Patient healthState is HEALTHY');
+    assert(engine.state.people['P-1044'].prisonerState === 'INSIDE_CELL', 'Patient discharged to cell');
+    assert(engine.state.eventTimeline.some(e => e.type === 'RECOVERY_COMPLETE'), 'RECOVERY_COMPLETE event logged');
+
+    // 35. Test E: Compromised Officer 8-Stage Flow & Revocation
+    console.log('\n[SUITE 35: Test E – Compromised Officer 8-Stage Flow & Revocation]');
+    engine.resetToInitial();
+    const suspendRes = await request('/api/officers/OFC-514/suspend', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` }
+    });
+    assert(suspendRes.status === 200, 'Officer suspend endpoint succeeds');
+    assert(engine.state.people['OFC-514'].officerState === 'SUSPENDED', 'Officer state is SUSPENDED');
+    assert(engine.state.revokedCards.includes('CARD-OFC-514'), 'Officer RFID card in revoked list');
+
+    // Attempted badge swipe must be strictly DENIED
+    const deniedScan = engine.handleRfidScan({
+      readerId: 'RFID-BLOCK-A',
+      cardId: 'CARD-OFC-514'
+    });
+    assert(deniedScan.result === 'DENIED', 'Suspended officer RFID swipe strictly DENIED');
+
+    // Dispatching new task to suspended officer must be rejected
+    let dispatchFailed = false;
+    try {
+      engine.dispatchOfficerTask('OFC-514', { commandType: 'PATROL_ZONE', targetWaypointId: 'W_NORTH_A' });
+    } catch (e) {
+      dispatchFailed = true;
+    }
+    assert(dispatchFailed === true, 'Task dispatch to suspended officer is rejected');
+
+    // 36. Test F: Movement Continuity & Waypoint Routing
+    console.log('\n[SUITE 36: Test F – Movement Continuity & Waypoint Routing]');
+    const testPath = findShortestPath('W_NORTH_A', 'W_PERIM_EAST_N');
+    assert(testPath.length >= 4, 'Valid non-empty shortest path found across facility graph');
+    assert(testPath[0] === 'W_NORTH_A', 'Path originates at start waypoint');
+    assert(testPath[testPath.length - 1] === 'W_PERIM_EAST_N', 'Path terminates at destination waypoint');
+
+    // 37. Test G: Scenario Isolation & Clean Baseline Reset
+    console.log('\n[SUITE 37: Test G – Scenario Isolation & Clean Baseline Reset]');
+    engine.resetToInitial();
+    assert(engine.state.eventTimeline.length === 0, 'Event timeline cleared on reset');
+    assert(engine.state.revokedCards.length === 0, 'Revoked cards list cleared on reset');
+    assert(engine.state.people['OFC-514'].officerState === 'PATROLLING', 'Officer states reset to PATROLLING');
+    assert(engine.state.people['P-1044'].prisonerState === 'INSIDE_CELL', 'Prisoner states reset to INSIDE_CELL');
+    assert(engine.state.people['OFC-514'].health === 100, 'All personnel health restored to 100 HP');
+
+    // 38. Test H: Authoritative Event Timeline & API Endpoints
+    console.log('\n[SUITE 38: Test H – Authoritative Event Timeline & API Endpoints]');
+    engine.logSimulationEvent({
+      type: 'SECURITY_AUDIT_PROBE',
+      sourceEntity: { id: 'TEST', type: 'SYSTEM' },
+      location: 'Central Control',
+      outcome: 'SUCCESS',
+      details: { probe: true }
+    });
+    const eventsRes = await request('/api/events');
+    assert(eventsRes.status === 200, 'Event timeline endpoint returns HTTP 200');
+    assert(eventsRes.data?.events?.length > 0, 'Event timeline contains logged events');
+    assert(eventsRes.data?.events[0]?.type === 'SECURITY_AUDIT_PROBE', 'Event data structure conforms to specification');
+    assert(eventsRes.data?.events[0]?.timestamp !== undefined, 'Event contains authoritative timestamp');
+
+    // 39. Test I: Scenario Execution with Short and Full Keys
+    console.log('\n[SUITE 39: Test I – Scenario Execution with Aliases]');
+    const startShortB = await request('/api/scenarios/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ scenarioId: 'SCENARIO_B' })
+    });
+    assert(startShortB.status === 200, 'Starting scenario with short alias SCENARIO_B succeeds');
+    assert(engine.state.activeScenario === 'SCENARIO_B_ESCAPE_INTERVENTION', 'Alias SCENARIO_B resolves to SCENARIO_B_ESCAPE_INTERVENTION');
+
+    const startShortD = await request('/api/scenarios/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ scenarioId: 'SCENARIO_D' })
+    });
+    assert(startShortD.status === 200, 'Starting scenario with short alias SCENARIO_D succeeds');
+    assert(engine.state.activeScenario === 'SCENARIO_D_COMPROMISED_OFFICER', 'Alias SCENARIO_D resolves to SCENARIO_D_COMPROMISED_OFFICER');
 
 
   } catch (err) {

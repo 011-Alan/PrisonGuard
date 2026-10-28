@@ -133,6 +133,10 @@ export const INITIAL_STATE = {
     ]
   },
 
+  // Authoritative Event Timeline & Revocations
+  eventTimeline: [],
+  revokedCards: [],
+
   // Facility Emergency Lockdown State
   lockdown: {
     isActive: false,
@@ -608,6 +612,7 @@ export const INITIAL_STATE = {
       path: [],
       activity: 'Resting in Cell',
       status: 'NORMAL', // 'NORMAL' | 'ESCAPING' | 'DETAINED' | 'IN_TRANSIT' | 'RESTRICTED'
+      prisonerState: 'INSIDE_CELL',
       health: 100,
       maxHealth: 100,
       healthState: 'HEALTHY', // 'HEALTHY' | 'INJURED' | 'INCAPACITATED' | 'RECEIVING_CARE' | 'RECOVERING' | 'RECOVERED'
@@ -647,6 +652,7 @@ export const INITIAL_STATE = {
       path: [],
       activity: 'Reading / Resting',
       status: 'NORMAL',
+      prisonerState: 'INSIDE_CELL',
       health: 100,
       maxHealth: 100,
       healthState: 'HEALTHY',
@@ -685,6 +691,7 @@ export const INITIAL_STATE = {
       path: [],
       activity: 'Bunk Inspection',
       status: 'NORMAL',
+      prisonerState: 'INSIDE_CELL',
       health: 100,
       maxHealth: 100,
       healthState: 'HEALTHY',
@@ -721,6 +728,7 @@ export const INITIAL_STATE = {
       path: [],
       activity: 'Medical Observation',
       status: 'NORMAL',
+      prisonerState: 'RECOVERING',
       health: 85,
       maxHealth: 100,
       healthState: 'RECOVERING',
@@ -758,6 +766,7 @@ export const INITIAL_STATE = {
       path: [],
       activity: 'Solitary Confinement',
       status: 'RESTRICTED',
+      prisonerState: 'INSIDE_CELL',
       health: 90,
       maxHealth: 100,
       healthState: 'HEALTHY',
@@ -795,6 +804,7 @@ export const INITIAL_STATE = {
       path: [],
       activity: 'Yard Recreation / Exercise',
       status: 'NORMAL',
+      prisonerState: 'PARTICIPATING_IN_ACTIVITY',
       health: 100,
       maxHealth: 100,
       healthState: 'HEALTHY',
@@ -942,6 +952,7 @@ export const INITIAL_STATE = {
       targetWaypoint: null,
       path: [],
       activity: 'SOC Monitoring & Command',
+      officerState: 'ON_DUTY',
       patrolState: 'STATIONARY_POST',
       status: 'NORMAL',
       health: 100,
@@ -976,6 +987,7 @@ export const INITIAL_STATE = {
       targetWaypoint: null,
       path: [],
       activity: 'Medical Clinic Rounds & Patient Review',
+      officerState: 'ON_DUTY',
       patrolState: 'CLINICAL_ROUNDS',
       status: 'NORMAL',
       health: 100,
@@ -1008,6 +1020,7 @@ export const INITIAL_STATE = {
       targetWaypoint: null,
       path: [],
       activity: 'Dispensing Scheduled Medication',
+      officerState: 'ON_DUTY',
       patrolState: 'MEDICATION_DISPENSE',
       status: 'NORMAL',
       health: 100,

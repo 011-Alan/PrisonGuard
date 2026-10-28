@@ -6,11 +6,18 @@ import { ScenarioRunner } from './scenarios.js';
 import { mqttSimulator } from '../communication/mqttSimulator.js';
 import { auditLogger } from '../utils/audit.js';
 import { db } from '../storage/db.js';
+import {
+  PRISONER_STATES,
+  OFFICER_STATES,
+  canTransitionPrisoner,
+  canTransitionOfficer
+} from './stateMachines.js';
 
 export class SimulationEngine {
   constructor(io) {
     this.io = io;
     this.state = JSON.parse(JSON.stringify(INITIAL_STATE));
+    this.revokedCards = new Set();
 
     // Restore persisted incidents or seed baseline
     const persistedIncidents = db.getIncidents();
@@ -48,6 +55,12 @@ export class SimulationEngine {
 
   resetToInitial() {
     this.state = JSON.parse(JSON.stringify(INITIAL_STATE));
+    this.revokedCards = new Set();
+    this.state.revokedCards = [];
+    this.state.eventTimeline = [];
+    if (this.scenarios) {
+      this.scenarios.clear();
+    }
     this.rules = new SensorFusionEngine(this.state, (ev) => this.broadcastEvent(ev));
     this.commandHistory = [];
     db.reset();
@@ -59,6 +72,100 @@ export class SimulationEngine {
       details: {}
     });
     this.broadcastState();
+  }
+
+  logSimulationEvent({
+    type,
+    sourceEntity = null,
+    targetEntity = null,
+    location = 'Facility Wide',
+    previousState = null,
+    newState = null,
+    incidentId = null,
+    commandId = null,
+    outcome = 'SUCCESS',
+    details = {}
+  }) {
+    if (!this.state.eventTimeline) this.state.eventTimeline = [];
+    const event = {
+      id: `EVT-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
+      type,
+      sourceEntity,
+      targetEntity,
+      location,
+      previousState,
+      newState,
+      incidentId,
+      commandId,
+      outcome,
+      details,
+      timestamp: new Date().toISOString()
+    };
+    this.state.eventTimeline.unshift(event);
+    if (this.state.eventTimeline.length > 200) {
+      this.state.eventTimeline.pop();
+    }
+    this.broadcastEvent('simulation:event', event);
+    return event;
+  }
+
+  transitionPrisonerState(prisonerId, nextState, reason = '', details = {}) {
+    const prisoner = this.state.people[prisonerId];
+    if (!prisoner) return false;
+    const prev = prisoner.prisonerState || 'INSIDE_CELL';
+    if (!canTransitionPrisoner(prev, nextState)) {
+      console.warn(`[State Guard] Invalid prisoner transition from ${prev} to ${nextState} for ${prisonerId}`);
+    }
+    prisoner.prisonerState = nextState;
+    if (nextState === PRISONER_STATES.ATTEMPTING_ESCAPE) {
+      prisoner.status = 'ESCAPING';
+    } else if (nextState === PRISONER_STATES.RESTRAINED) {
+      prisoner.status = 'DETAINED';
+    } else if (nextState === PRISONER_STATES.INSIDE_CELL || nextState === PRISONER_STATES.RESTING) {
+      prisoner.status = 'NORMAL';
+    }
+
+    this.logSimulationEvent({
+      type: 'PRISONER_STATE_CHANGE',
+      sourceEntity: { id: prisoner.id, name: prisoner.name, type: 'PRISONER' },
+      location: prisoner.currentRoom,
+      previousState: prev,
+      newState: nextState,
+      outcome: 'SUCCESS',
+      details: { reason, ...details }
+    });
+    return true;
+  }
+
+  transitionOfficerState(officerId, nextState, reason = '', details = {}) {
+    const officer = this.state.people[officerId];
+    if (!officer) return false;
+    const prev = officer.officerState || 'ON_DUTY';
+    if (!canTransitionOfficer(prev, nextState)) {
+      console.warn(`[State Guard] Invalid officer transition from ${prev} to ${nextState} for ${officerId}`);
+    }
+    officer.officerState = nextState;
+    if (nextState === OFFICER_STATES.SUSPENDED) {
+      officer.availability = 'SUSPENDED';
+      officer.credentialStatus = 'SUSPENDED';
+    } else if (nextState === OFFICER_STATES.INCAPACITATED) {
+      officer.availability = 'INCAPACITATED';
+    } else if (nextState === OFFICER_STATES.MOVING_TO_ASSIGNMENT || nextState === OFFICER_STATES.RESPONDING_TO_CONFLICT) {
+      officer.availability = 'BUSY';
+    } else if (nextState === OFFICER_STATES.PATROLLING || nextState === OFFICER_STATES.ON_DUTY) {
+      officer.availability = 'AVAILABLE';
+    }
+
+    this.logSimulationEvent({
+      type: 'OFFICER_STATE_CHANGE',
+      sourceEntity: { id: officer.id, name: officer.name, type: 'OFFICER' },
+      location: officer.currentRoom,
+      previousState: prev,
+      newState: nextState,
+      outcome: 'SUCCESS',
+      details: { reason, ...details }
+    });
+    return true;
   }
 
   broadcastState() {
@@ -241,9 +348,9 @@ export class SimulationEngine {
   processAutonomousStaffAndPrisoners(now) {
     const speed = this.state.simulationClock?.speed || 1;
 
-    // 1. Process officer states & timers
+    // 1. Process officer & staff states & timers
     for (const [id, person] of Object.entries(this.state.people)) {
-      if (person.type === 'OFFICER') {
+      if (person.type === 'OFFICER' || person.type === 'SUPERVISOR' || person.type === 'MEDICAL_NURSE' || person.type === 'MEDICAL_DOCTOR') {
         // Message bubble expiry
         if (person.messageBubble && person.messageBubble.expiresAt < Date.now()) {
           person.messageBubble = null;
@@ -331,26 +438,94 @@ export class SimulationEngine {
           }
         }
 
+        // Medical Escort Progression
+        if (person.officerState === 'ESCORTING_INJURED_PERSON' && person.currentAssignment?.patientId) {
+          const patient = this.state.people[person.currentAssignment.patientId];
+          if (patient) {
+            if (patient.prisonerState === 'AWAITING_MEDICAL_ESCORT') {
+              const dist = Math.hypot(person.x - patient.x, person.y - patient.y);
+              if (dist <= 60 || person.currentWaypoint === patient.currentWaypoint) {
+                // Escort meets patient
+                patient.prisonerState = 'BEING_ESCORTED_TO_MEDICAL';
+                patient.activity = `Under Medical Escort to Medical Bay with ${person.name}`;
+                person.activity = `Escorting ${patient.name} to Medical Bay`;
+                const medPath = findShortestPath(person.currentWaypoint, 'W_MED_1').slice(1);
+                person.path = [...medPath];
+                patient.path = [...medPath];
+                person.targetWaypoint = 'W_MED_1';
+                patient.targetWaypoint = 'W_MED_1';
+
+                this.logSimulationEvent({
+                  type: 'MEDICAL_ESCORT_STARTED',
+                  sourceEntity: { id: person.id, name: person.name, type: person.type },
+                  targetEntity: { id: patient.id, name: patient.name, type: patient.type },
+                  location: person.currentRoom,
+                  outcome: 'SUCCESS',
+                  details: { note: 'Escort staff arrived; en route to Medical Ward' }
+                });
+              }
+            } else if (patient.prisonerState === 'BEING_ESCORTED_TO_MEDICAL') {
+              if (person.currentWaypoint === 'W_MED_1' && (!person.path || person.path.length === 0)) {
+                // Arrived at Medical Bay
+                patient.prisonerState = 'RECEIVING_MEDICAL_CARE';
+                patient.activity = 'Receiving Medical Treatment in Clinic';
+                person.officerState = 'PATROLLING';
+                person.availability = 'AVAILABLE';
+                person.activity = 'Resumed Routine Patrol after Medical Escort';
+                person.currentAssignment = null;
+
+                this.logSimulationEvent({
+                  type: 'PATIENT_ADMITTED',
+                  sourceEntity: { id: patient.id, name: patient.name, type: patient.type },
+                  targetEntity: { id: person.id, name: person.name, type: person.type },
+                  location: 'Medical Ward - Triage',
+                  outcome: 'SUCCESS',
+                  details: { note: 'Patient admitted to clinic; receiving medical care' }
+                });
+              }
+            }
+          }
+        }
+
         // Admin-assigned task progression
-        if (person.officerState === 'RESPONDING_TO_ADMIN_COMMAND' && person.currentAssignment) {
+        if ((person.officerState === 'MOVING_TO_ASSIGNMENT' || person.officerState === 'RESPONDING_TO_ADMIN_COMMAND') && person.currentAssignment) {
           const targetWp = person.currentAssignment.targetWaypointId;
           if (person.currentWaypoint === targetWp && (!person.path || person.path.length === 0)) {
             // Task completed!
             const taskId = person.currentAssignment.taskId;
+            const commandType = person.currentAssignment.commandType;
             const task = this.state.officerTasks.find(t => t.id === taskId);
             if (task) {
               task.status = 'COMPLETED';
               task.completedAt = now;
             }
 
-            person.officerState = 'OBSERVING';
-            person.activity = `Stationed at ${person.currentRoom}`;
+            if (commandType === 'MONITOR_PRISONER') {
+              person.officerState = 'MONITORING_PRISONER';
+              person.activity = `Monitoring Inmate at ${person.currentRoom}`;
+            } else if (commandType === 'INSPECT_CELL') {
+              person.officerState = 'INSPECTING_CELL';
+              person.activity = `Inspecting Cell at ${person.currentRoom}`;
+            } else {
+              person.officerState = 'OBSERVING';
+              person.activity = `Stationed at ${person.currentRoom}`;
+            }
+
             person.currentAssignment = null;
             person.messageBubble = {
               text: `Arrived at ${person.currentRoom}. Station secured.`,
               expiresAt: Date.now() + 5000,
               type: 'RADIO'
             };
+
+            this.logSimulationEvent({
+              type: 'OFFICER_ARRIVED',
+              sourceEntity: { id: person.id, name: person.name, type: 'OFFICER' },
+              location: person.currentRoom,
+              commandId: taskId,
+              outcome: 'SUCCESS',
+              details: { commandType, targetWp }
+            });
 
             this.addRecentActivity({
               event: `Task Complete: ${person.name} stationed at ${person.currentRoom}`,
@@ -359,6 +534,58 @@ export class SimulationEngine {
               color: 'green'
             });
             this.broadcastEvent('officer:task_completed', { taskId, officerId: person.id });
+          }
+        }
+      }
+    }
+
+    // 2. Simulation-time-driven gradual medical recovery
+    if (!this.state.simulationClock?.isPaused) {
+      for (const [id, person] of Object.entries(this.state.people)) {
+        const isReceivingCare = person.prisonerState === 'RECEIVING_MEDICAL_CARE' ||
+                                person.prisonerState === 'RECOVERING' ||
+                                person.officerState === 'AT_MEDICAL_BAY' ||
+                                person.officerState === 'MEDICAL_RECOVERY';
+
+        if (isReceivingCare && person.health < 100) {
+          const healRate = 5 * speed;
+          person.health = Math.min(100, Math.round(person.health + healRate));
+
+          if (person.health >= 80 && person.health < 100) {
+            person.healthState = 'RECOVERING';
+            if (person.type === 'PRISONER') person.prisonerState = 'RECOVERING';
+          } else if (person.health >= 100) {
+            person.health = 100;
+            person.healthState = 'HEALTHY';
+            if (person.type === 'OFFICER') {
+              person.officerState = 'PATROLLING';
+              person.availability = 'AVAILABLE';
+              person.status = 'NORMAL';
+              person.activity = 'Resumed Duty following Medical Recovery';
+              this.movePersonTo(person.id, 'W_NORTH_A');
+            } else {
+              person.prisonerState = 'INSIDE_CELL';
+              person.status = 'NORMAL';
+              person.activity = 'Resting in Cell (Cleared from Clinic)';
+              if (person.cellWaypoint) {
+                this.movePersonTo(person.id, person.cellWaypoint);
+              }
+            }
+
+            this.logSimulationEvent({
+              type: 'RECOVERY_COMPLETE',
+              sourceEntity: { id: person.id, name: person.name, type: person.type },
+              location: 'Medical Ward - Triage',
+              outcome: 'SUCCESS',
+              details: { finalHealth: 100, note: 'Person reached 100 HP; discharged to post/cell' }
+            });
+
+            this.addRecentActivity({
+              event: `${person.name} Fully Recovered (100 HP) – Discharged`,
+              location: 'Medical Clinic',
+              status: 'NORMAL',
+              color: 'green'
+            });
           }
         }
       }
@@ -423,7 +650,16 @@ export class SimulationEngine {
   stepAutonomousPatrols() {
     // Capt. Reyes perimeter patrol
     const reyes = this.state.people['OFC-702'];
-    if (reyes && (!reyes.path || reyes.path.length === 0)) {
+    if (
+      reyes &&
+      !reyes.currentAssignment &&
+      reyes.officerState !== 'SUSPENDED' &&
+      reyes.officerState !== 'INCAPACITATED' &&
+      reyes.officerState !== 'ESCORTING_PRISONER' &&
+      reyes.officerState !== 'ESCORTING_INJURED_PERSON' &&
+      (reyes.officerState === 'PATROLLING' || reyes.officerState === 'ON_DUTY') &&
+      (!reyes.path || reyes.path.length === 0)
+    ) {
       const perimeterWps = ['W_PERIM_EAST_N', 'W_PERIM_EAST_S', 'W_PERIM_SOUTH_E', 'W_PERIM_SOUTH_MID', 'W_PERIM_EAST_N'];
       const nextIdx = (perimeterWps.indexOf(reyes.currentWaypoint) + 1) % perimeterWps.length;
       this.movePersonTo('OFC-702', perimeterWps[nextIdx]);
@@ -431,7 +667,16 @@ export class SimulationEngine {
 
     // Lt. Sterling cell corridor checks
     const sterling = this.state.people['OFC-514'];
-    if (sterling && (!sterling.path || sterling.path.length === 0)) {
+    if (
+      sterling &&
+      !sterling.currentAssignment &&
+      sterling.officerState !== 'SUSPENDED' &&
+      sterling.officerState !== 'INCAPACITATED' &&
+      sterling.officerState !== 'ESCORTING_PRISONER' &&
+      sterling.officerState !== 'ESCORTING_INJURED_PERSON' &&
+      (sterling.officerState === 'PATROLLING' || sterling.officerState === 'ON_DUTY') &&
+      (!sterling.path || sterling.path.length === 0)
+    ) {
       const blockWps = ['W_NORTH_A', 'W_A_CORR_2', 'W_NORTH_MID_1', 'W_NORTH_B', 'W_B_CORR_2'];
       const nextIdx = (blockWps.indexOf(sterling.currentWaypoint) + 1) % blockWps.length;
       this.movePersonTo('OFC-514', blockWps[nextIdx]);
@@ -600,14 +845,11 @@ export class SimulationEngine {
         this.state.devices[door.reedId].lastUpdated = new Date().toISOString();
       }
 
-      // Check if prisoner escapes upon cell door opening
+      // Evaluate realistic prisoner reactions to cell door state change
       if (action === 'OPEN') {
-        const occupant = Object.values(this.state.people).find(
-          p => p.assignedDoorId === doorId && p.status === 'NORMAL' && p.currentRoom && p.currentRoom.includes('Cell')
-        );
-        if (occupant) {
-          this.triggerPrisonerEscape(occupant.id);
-        }
+        this.evaluateDoorOpeningReactions(doorId);
+      } else if (action === 'CLOSE') {
+        this.evaluateDoorClosingReactions(doorId);
       }
 
       this.updateCommandStage(cmd.id, 'ACTUATOR_TRANSITION', 'COMPLETED', `Door reached ${door.position}`);
@@ -672,6 +914,336 @@ export class SimulationEngine {
 
     this.broadcastState();
     return { command: cmd, door };
+  }
+
+  evaluateDoorOpeningReactions(doorId) {
+    const door = this.state.doors[doorId];
+    if (!door) return;
+
+    // Find any prisoner assigned to this door or currently in this cell
+    const prisoner = Object.values(this.state.people).find(
+      p => p.type === 'PRISONER' && (p.assignedDoorId === doorId || (p.currentRoom && p.currentRoom.includes(door.name)))
+    );
+    if (!prisoner) return;
+
+    // Check if an inspecting officer is at the cell door/corridor
+    const inspectingOfficer = Object.values(this.state.people).find(
+      o => o.type === 'OFFICER' && (o.officerState === 'INSPECTING_CELL' || (o.currentWaypoint && o.currentWaypoint === prisoner.cellWaypoint))
+    );
+
+    if (inspectingOfficer) {
+      prisoner.activity = 'Standing for Cell Inspection';
+      this.logSimulationEvent({
+        type: 'CELL_INSPECTION_HOLD',
+        sourceEntity: { id: prisoner.id, name: prisoner.name, type: 'PRISONER' },
+        targetEntity: { id: inspectingOfficer.id, name: inspectingOfficer.name, type: 'OFFICER' },
+        location: door.location,
+        previousState: prisoner.prisonerState,
+        newState: prisoner.prisonerState,
+        outcome: 'SUCCESS',
+        details: { doorId, note: 'Officer inspecting cell; inmate remains inside cell' }
+      });
+      return;
+    }
+
+    // Check schedule for routine release (e.g. yard recreation or lunch)
+    const phaseId = this.state.simulationClock?.currentPhase?.id;
+    const isRoutineRelease = (phaseId === 'YARD_RECREATION' || phaseId === 'LUNCH_PERIOD');
+
+    if (isRoutineRelease && prisoner.status === 'NORMAL') {
+      const targetWp = phaseId === 'YARD_RECREATION' ? 'W_YARD_1' : 'W_B_CORR_2';
+      this.transitionPrisonerState(prisoner.id, PRISONER_STATES.MOVING_TO_DESTINATION, 'Routine Schedule Release');
+      prisoner.activity = `En route to ${phaseId === 'YARD_RECREATION' ? 'Common Yard' : 'Mess Hall'}`;
+      this.movePersonTo(prisoner.id, targetWp);
+
+      this.logSimulationEvent({
+        type: 'PRISONER_EXITED_CELL',
+        sourceEntity: { id: prisoner.id, name: prisoner.name, type: 'PRISONER' },
+        location: door.location,
+        previousState: PRISONER_STATES.INSIDE_CELL,
+        newState: PRISONER_STATES.MOVING_TO_DESTINATION,
+        outcome: 'SUCCESS',
+        details: { doorId, reason: 'ROUTINE_SCHEDULE', phaseId }
+      });
+      return;
+    }
+
+    // Unauthorized door opening -> prisoner attempts escape
+    if (prisoner.profile === 'ESCAPE_PRONE' || prisoner.status === 'NORMAL') {
+      this.transitionPrisonerState(prisoner.id, PRISONER_STATES.ATTEMPTING_ESCAPE, 'Unauthorized Door Opening');
+      this.triggerPrisonerEscape(prisoner.id);
+
+      this.logSimulationEvent({
+        type: 'PRISONER_EXITED_CELL',
+        sourceEntity: { id: prisoner.id, name: prisoner.name, type: 'PRISONER' },
+        location: door.location,
+        previousState: PRISONER_STATES.INSIDE_CELL,
+        newState: PRISONER_STATES.ATTEMPTING_ESCAPE,
+        outcome: 'SUCCESS',
+        details: { doorId, reason: 'UNAUTHORIZED_ESCAPE_ATTEMPT' }
+      });
+    }
+  }
+
+  evaluateDoorClosingReactions(doorId) {
+    const door = this.state.doors[doorId];
+    if (!door) return;
+
+    // Check if an inmate was attempting to exit through this door
+    const prisoner = Object.values(this.state.people).find(
+      p => p.type === 'PRISONER' && p.assignedDoorId === doorId && p.prisonerState === 'ATTEMPTING_ESCAPE'
+    );
+
+    if (prisoner) {
+      // If prisoner hasn't crossed doorway (still at cell waypoint)
+      if (prisoner.currentWaypoint === prisoner.cellWaypoint) {
+        prisoner.path = [];
+        prisoner.targetWaypoint = null;
+        this.transitionPrisonerState(prisoner.id, PRISONER_STATES.INSIDE_CELL, 'Door closed before doorway crossing');
+        prisoner.status = 'NORMAL';
+        prisoner.activity = 'Resting in Cell (Exit Blocked by Interlock)';
+
+        this.logSimulationEvent({
+          type: 'EXIT_BLOCKED_DOOR_CLOSED',
+          sourceEntity: { id: prisoner.id, name: prisoner.name, type: 'PRISONER' },
+          location: door.location,
+          previousState: PRISONER_STATES.ATTEMPTING_ESCAPE,
+          newState: PRISONER_STATES.INSIDE_CELL,
+          outcome: 'BLOCKED',
+          details: { doorId, note: 'Cell door closed and locked before prisoner crossed doorway' }
+        });
+      }
+    }
+  }
+
+  triggerPrisonerOfficerConflict({ prisonerId = 'P-1044', officerId = 'OFC-514', severity = 'HIGH' } = {}) {
+    const prisoner = this.state.people[prisonerId];
+    const officer = this.state.people[officerId];
+    if (!prisoner || !officer) throw new Error('Prisoner or Officer not found for conflict');
+
+    // Single one-time health drop: -30 HP, floored at 15
+    officer.health = Math.max(15, (officer.health || 100) - 30);
+    officer.healthState = officer.health <= 49 ? 'INCAPACITATED' : 'INJURED';
+    officer.officerState = 'INCAPACITATED';
+    officer.availability = 'INCAPACITATED';
+    officer.activity = 'Incapacitated in Inmate Altercation – Backup Requested';
+
+    prisoner.prisonerState = 'INVOLVED_IN_CONFLICT';
+    prisoner.activity = 'Involved in Altercation with Custodial Officer';
+
+    // Officer automated radio distress call
+    officer.messageBubble = {
+      text: '10-33 Officer in distress! Inmate resisting command at my location!',
+      expiresAt: Date.now() + 8000,
+      type: 'RADIO'
+    };
+
+    // Incident creation
+    const incId = `INC-ALT-${Date.now().toString(36).toUpperCase()}`;
+    const incident = {
+      id: incId,
+      title: `Inmate-Officer Altercation: ${prisoner.name} vs ${officer.name}`,
+      rule: 'RULE H: Physical Altercation & Staff Assault Alert',
+      severity: severity || 'HIGH',
+      location: officer.currentRoom,
+      coordinates: { x: officer.x, y: officer.y },
+      associatedPerson: prisoner.id,
+      associatedOfficer: officer.id,
+      status: 'ACTIVE',
+      timestamp: new Date().toISOString(),
+      evidence: [
+        `Officer ${officer.name} sustained physical injury (${officer.health} HP)`,
+        `Inmate ${prisoner.name} engaged in active physical resistance`,
+        `Immediate medical escort and backup dispatched`
+      ]
+    };
+    this.state.incidents.unshift(incident);
+    db.setIncidents(this.state.incidents);
+
+    this.logSimulationEvent({
+      type: 'CONFLICT_STARTED',
+      sourceEntity: { id: prisoner.id, name: prisoner.name, type: 'PRISONER' },
+      targetEntity: { id: officer.id, name: officer.name, type: 'OFFICER' },
+      location: officer.currentRoom,
+      incidentId: incId,
+      outcome: 'ESCALATED',
+      details: { officerDamage: 30, remainingHealth: officer.health }
+    });
+
+    this.addRecentActivity({
+      event: `ALTERCATION: ${prisoner.name} resisted ${officer.name}`,
+      location: officer.currentRoom,
+      status: 'CRITICAL',
+      color: 'red'
+    });
+
+    this.broadcastEvent('incident:created', incident);
+    this.broadcastState();
+    return { incident, officer, prisoner };
+  }
+
+  triggerPrisonerConflict({ prisoner1Id = 'P-1044', prisoner2Id = 'P-2089', location = 'W_YARD_1', severity = 'MEDIUM' } = {}) {
+    const p1 = this.state.people[prisoner1Id];
+    const p2 = this.state.people[prisoner2Id];
+    if (!p1 || !p2) throw new Error('Both prisoners required for conflict');
+
+    // Single one-time health drop for victim/injured prisoner: -25 HP, floored at 15
+    p1.health = Math.max(15, (p1.health || 100) - 25);
+    p1.healthState = p1.health <= 49 ? 'INCAPACITATED' : 'INJURED';
+    p1.prisonerState = 'INJURED';
+    p1.activity = 'Injured in Inmate Altercation – Awaiting Medical Escort';
+
+    p2.prisonerState = 'INVOLVED_IN_CONFLICT';
+    p2.activity = 'Involved in Inmate Altercation';
+
+    // Incident creation
+    const incId = `INC-INM-${Date.now().toString(36).toUpperCase()}`;
+    const incident = {
+      id: incId,
+      title: `Inmate Altercation: ${p1.name} and ${p2.name}`,
+      rule: 'RULE G: Inmate Disorder & Violence Detection',
+      severity: severity || 'MEDIUM',
+      location: p1.currentRoom,
+      coordinates: { x: p1.x, y: p1.y },
+      associatedPerson: p1.id,
+      status: 'ACTIVE',
+      timestamp: new Date().toISOString(),
+      evidence: [
+        `Inmate ${p1.name} sustained physical injury (${p1.health} HP)`,
+        `Disturbance flagged in ${p1.currentRoom}`,
+        `Medical escort required for triage`
+      ]
+    };
+    this.state.incidents.unshift(incident);
+    db.setIncidents(this.state.incidents);
+
+    this.logSimulationEvent({
+      type: 'CONFLICT_STARTED',
+      sourceEntity: { id: p2.id, name: p2.name, type: 'PRISONER' },
+      targetEntity: { id: p1.id, name: p1.name, type: 'PRISONER' },
+      location: p1.currentRoom,
+      incidentId: incId,
+      outcome: 'ESCALATED',
+      details: { victimDamage: 25, remainingHealth: p1.health }
+    });
+
+    this.addRecentActivity({
+      event: `DISORDER: Altercation between ${p1.name} and ${p2.name}`,
+      location: p1.currentRoom,
+      status: 'CRITICAL',
+      color: 'amber'
+    });
+
+    this.broadcastEvent('incident:created', incident);
+    this.broadcastState();
+    return { incident, p1, p2 };
+  }
+
+  assignMedicalEscort({ patientId, escortStaffId = null, user = { username: 'ADMIN', role: 'ADMIN' } }) {
+    const patient = this.state.people[patientId];
+    if (!patient) throw new Error(`Patient ${patientId} not found`);
+
+    // Find available medical staff or security officer
+    let escort = null;
+    if (escortStaffId && this.state.people[escortStaffId]) {
+      escort = this.state.people[escortStaffId];
+    } else {
+      escort = Object.values(this.state.people).find(
+        p => (p.type === 'MEDICAL_NURSE' || p.type === 'MEDICAL_DOCTOR' || p.type === 'OFFICER') &&
+             p.availability !== 'BUSY' &&
+             p.officerState !== 'SUSPENDED' &&
+             p.officerState !== 'INCAPACITATED'
+      );
+    }
+    if (!escort) throw new Error('No available staff or officer for medical escort');
+
+    patient.prisonerState = 'AWAITING_MEDICAL_ESCORT';
+    patient.activity = `Awaiting Medical Escort (${escort.name} Dispatched)`;
+
+    escort.officerState = 'ESCORTING_INJURED_PERSON';
+    escort.availability = 'BUSY';
+    escort.activity = `Dispatched to Escort ${patient.name} to Medical Bay`;
+    escort.currentAssignment = {
+      type: 'MEDICAL_ESCORT',
+      patientId: patient.id,
+      targetWaypointId: patient.currentWaypoint || 'W_YARD_1'
+    };
+
+    // Escort routes to patient location
+    const currentWp = escort.currentWaypoint || 'W_MED_1';
+    const patientWp = patient.currentWaypoint || 'W_YARD_1';
+    escort.path = findShortestPath(currentWp, patientWp).slice(1);
+    escort.targetWaypoint = patientWp;
+
+    this.logSimulationEvent({
+      type: 'MEDICAL_ESCORT_REQUESTED',
+      sourceEntity: { id: escort.id, name: escort.name, type: escort.type },
+      targetEntity: { id: patient.id, name: patient.name, type: patient.type },
+      location: patient.currentRoom,
+      outcome: 'SUCCESS',
+      details: { patientId: patient.id, escortId: escort.id }
+    });
+
+    this.addRecentActivity({
+      event: `Medical Escort: ${escort.name} responding to ${patient.name}`,
+      location: patient.currentRoom,
+      status: 'NORMAL',
+      color: 'blue'
+    });
+
+    this.broadcastState();
+    return { patient, escort };
+  }
+
+  suspendOfficer(officerId, user = { username: 'ADMIN', role: 'ADMIN' }) {
+    const officer = this.state.people[officerId];
+    if (!officer) throw new Error(`Officer ${officerId} not found`);
+
+    officer.officerState = 'SUSPENDED';
+    officer.availability = 'SUSPENDED';
+    officer.credentialStatus = 'SUSPENDED';
+    officer.status = 'RESTRICTED';
+    officer.activity = 'SUSPENDED FROM DUTY (Pending IA Review)';
+    officer.currentAssignment = null;
+    officer.path = [];
+    officer.targetWaypoint = null;
+
+    if (!this.revokedCards) this.revokedCards = new Set();
+    if (!this.state.revokedCards) this.state.revokedCards = [];
+    if (officer.rfidCardId) {
+      this.revokedCards.add(officer.rfidCardId);
+      if (!this.state.revokedCards.includes(officer.rfidCardId)) {
+        this.state.revokedCards.push(officer.rfidCardId);
+      }
+    }
+
+    auditLogger.log({
+      type: 'OFFICER_SUSPENDED',
+      user,
+      action: `Officer ${officer.name} (${officer.id}) suspended from duty; credentials revoked`,
+      details: { officerId, rfidCardId: officer.rfidCardId }
+    });
+
+    this.logSimulationEvent({
+      type: 'OFFICER_SUSPENDED',
+      sourceEntity: { id: officer.id, name: officer.name, type: 'OFFICER' },
+      location: officer.currentRoom,
+      previousState: officer.officerState,
+      newState: 'SUSPENDED',
+      outcome: 'SUCCESS',
+      details: { officerId, suspendedBy: user.username }
+    });
+
+    this.addRecentActivity({
+      event: `OFFICER SUSPENDED: ${officer.name} (${officer.badge})`,
+      location: officer.currentRoom,
+      status: 'CRITICAL',
+      color: 'red'
+    });
+
+    this.broadcastEvent('officer:suspended', { officerId, officer });
+    this.broadcastState();
+    return officer;
   }
 
   // --- Facility Lockdown Activation & Release ---
@@ -1318,7 +1890,11 @@ export class SimulationEngine {
 
     if (!WAYPOINTS[targetWaypointId]) throw new Error(`Invalid destination waypoint: ${targetWaypointId}`);
 
-    if (officer.officerState === 'MEDICAL_RECOVERY') {
+    if (officer.officerState === 'SUSPENDED' || officer.availability === 'SUSPENDED') {
+      throw new Error(`Officer ${officer.name} is currently suspended from duty.`);
+    }
+
+    if (officer.officerState === 'INCAPACITATED' || officer.availability === 'INCAPACITATED' || officer.officerState === 'MEDICAL_RECOVERY') {
       throw new Error(`Officer ${officer.name} is currently incapacitated / undergoing medical recovery.`);
     }
 
@@ -1376,7 +1952,7 @@ export class SimulationEngine {
 
     this.state.officerTasks.unshift(task);
 
-    officer.officerState = 'RESPONDING_TO_ADMIN_COMMAND';
+    officer.officerState = 'MOVING_TO_ASSIGNMENT';
     officer.availability = 'BUSY';
     officer.activity = `${commandType}: Heading to ${destinationRoom}`;
     officer.currentAssignment = { type: 'ADMIN_TASK', taskId, targetWaypointId, destinationRoom, commandType, targetPersonId };
@@ -1388,7 +1964,8 @@ export class SimulationEngine {
       type: 'DISPATCH'
     };
 
-    // Calculate valid walking path
+    // Calculate valid walking path - clear prior path first to prevent oscillation
+    officer.path = [];
     const currentWp = officer.currentWaypoint || 'W_NORTH_A';
     officer.path = findShortestPath(currentWp, targetWaypointId).slice(1);
     officer.targetWaypoint = targetWaypointId;
@@ -1398,6 +1975,16 @@ export class SimulationEngine {
       user,
       action: `Assigned task to ${officer.name}: ${commandType} at ${destinationRoom}`,
       details: task
+    });
+
+    this.logSimulationEvent({
+      type: 'OFFICER_DISPATCHED',
+      sourceEntity: { id: user.username, type: 'ADMIN' },
+      targetEntity: { id: officer.id, name: officer.name, type: 'OFFICER' },
+      location: destinationRoom,
+      commandId: taskId,
+      outcome: 'SUCCESS',
+      details: { commandType, targetWaypointId, priority }
     });
 
     this.addRecentActivity({
@@ -1912,7 +2499,7 @@ export class SimulationEngine {
     let role = 'UNKNOWN';
 
     // Check if card has been explicitly revoked
-    if (this.revokedCards && this.revokedCards.has(cardId)) {
+    if ((this.revokedCards && this.revokedCards.has(cardId)) || (this.state.revokedCards && this.state.revokedCards.includes(cardId))) {
       result = 'DENIED';
       reason = 'RFID Credential REVOKED by Security Administrator';
       if (person) {
