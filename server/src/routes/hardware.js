@@ -70,6 +70,26 @@ export function createHardwareRouter(hardwareManager) {
     }
   });
 
+  // Configure Physical Device Properties (Device ID, Display Name, Target Door)
+  router.post('/device/configure', authenticate, authorize(['SUPERVISOR', 'ADMIN']), (req, res) => {
+    try {
+      const { controllerId, displayName, targetDoorId } = req.body || {};
+      const updated = hardwareManager.configureDevice({ controllerId, displayName, targetDoorId }, req.user);
+      res.json({ success: true, hardware: updated, hardwareState: updated });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Get Recent RFID Scans
+  router.get('/rfid/recent', authenticate, (req, res) => {
+    try {
+      res.json({ success: true, scans: hardwareManager.recentRfidScans });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
   // =========================================================================
   // 2. ESP32 CONTROLLER PROTOCOL ENDPOINTS (Device Token Authenticated)
   // =========================================================================

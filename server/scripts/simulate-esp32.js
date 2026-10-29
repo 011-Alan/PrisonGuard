@@ -5,30 +5,31 @@
  *
  * This script runs a complete software emulation of the ESP32 Cell A-101 Door Controller.
  * It connects to the PrisonGuard backend via authenticated HTTP REST endpoints,
- * publishes heartbeats, polls for commands, simulates servo physical transit time,
- * triggers reed contact switch events, and simulates RFID badge presentation.
+ * publishes heartbeats, polls for commands, simulates SG90 servo transit,
+ * updates LED states, and simulates contactless RFID badge presentations.
  *
  * Usage:
  *   node server/scripts/simulate-esp32.js
  *   node server/scripts/simulate-esp32.js --url http://localhost:5000 --token pg-hw-secret-token-esp32-demo
  *
  * Interactive Controls (when running):
- *   Press [o] + Enter: Manually pull physical door open (Reed switch OPEN)
- *   Press [c] + Enter: Manually close physical door (Reed switch CLOSED)
+ *   Press [o] + Enter: Command door OPEN (Servo 90°, Green LED)
+ *   Press [c] + Enter: Command door CLOSED (Servo 0°, Red LED)
  *   Press [s] + Enter: Present authorized officer badge (CARD-OFC-514)
  *   Press [r] + Enter: Present revoked badge (CARD-REVOKED-999)
+ *   Press [u] + Enter: Present unknown visitor badge (CARD-UNKNOWN-777)
  *   Press [h] + Enter: Force instant heartbeat ping
  *   Press [q] + Enter: Disconnect & exit simulator
  * ==============================================================================
  */
 
-const readline = require('readline');
+import readline from 'readline';
 
 // Command line argument parser
 const args = process.argv.slice(2);
 let serverUrl = process.env.PRISONGUARD_SERVER_URL || 'http://localhost:5000';
 let deviceToken = process.env.HARDWARE_DEVICE_TOKEN || 'pg-hw-secret-token-esp32-demo';
-const controllerId = 'ESP32-CELL-01';
+let controllerId = process.env.HARDWARE_CONTROLLER_ID || 'CELL-01-PHYSICAL';
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--url' && args[i + 1]) {
@@ -36,6 +37,9 @@ for (let i = 0; i < args.length; i++) {
     i++;
   } else if (args[i] === '--token' && args[i + 1]) {
     deviceToken = args[i + 1];
+    i++;
+  } else if (args[i] === '--id' && args[i + 1]) {
+    controllerId = args[i + 1];
     i++;
   }
 }
@@ -45,8 +49,9 @@ serverUrl = serverUrl.replace(/\/+$/, '');
 
 // Simulated Hardware State
 let simulatedServoAngle = 0;        // 0 deg = Closed, 90 deg = Open
-let simulatedDoorState = 'CLOSED';   // 'CLOSED' | 'OPEN'
-let simulatedReedSwitch = 'CLOSED';  // 'CLOSED' | 'OPEN'
+let commandedDoorState = 'CLOSED';   // 'CLOSED' | 'OPEN'
+let redLedState = 'ON';
+let greenLedState = 'OFF';
 let isActuating = false;
 let running = true;
 
@@ -92,9 +97,11 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
 async function sendHeartbeat() {
   const payload = {
     controllerId,
-    doorState: simulatedDoorState,
+    doorState: commandedDoorState,
+    commandedState: commandedDoorState,
     servoAngle: simulatedServoAngle,
-    reedSwitch: simulatedReedSwitch,
+    positionVerified: false,
+    positionNote: 'Commanded state only (simulated prototype)',
     uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),
     wifiRssi: -58,
     freeHeap: 184200,
@@ -103,7 +110,7 @@ async function sendHeartbeat() {
 
   const res = await apiRequest('/api/hardware/heartbeat', 'POST', payload);
   if (res.ok) {
-    log('HEARTBEAT', `Telemetry synced: Door=${simulatedDoorState}, Servo=${simulatedServoAngle}°, Reed=${simulatedReedSwitch}`, green);
+    log('HEARTBEAT', `Telemetry synced: State=${commandedDoorState}, Servo=${simulatedServoAngle}°, RedLED=${redLedState}, GreenLED=${greenLedState}`, green);
   } else {
     log('HEARTBEAT', `Heartbeat failed: ${res.error || res.status}`, red);
   }
@@ -129,7 +136,7 @@ async function reportEvent(type, details) {
 async function pollCommands() {
   if (isActuating) return;
 
-  const res = await apiRequest('/api/hardware/commands/poll', 'GET');
+  const res = await apiRequest(`/api/hardware/commands/poll?controllerId=${controllerId}`, 'GET');
   if (res.ok && res.data && res.data.hasCommand) {
     const cmd = res.data.command;
     log('COMMAND', `Received command [${cmd.id}]: ${cmd.type} -> Action=${cmd.payload?.action}`, yellow);
@@ -137,169 +144,155 @@ async function pollCommands() {
     const action = cmd.payload?.action;
     if (action === 'OPEN' || action === 'CLOSE') {
       isActuating = true;
-      log('SERVO', `Starting physical servo rotation towards ${action}...`, cyan);
+      log('SERVO', `Starting SG90 physical servo rotation towards ${action}...`, cyan);
 
       // Simulate transit delay (350ms)
       setTimeout(async () => {
         if (action === 'OPEN') {
           simulatedServoAngle = 90;
-          simulatedDoorState = 'OPEN';
-          simulatedReedSwitch = 'OPEN';
+          commandedDoorState = 'OPEN';
+          redLedState = 'OFF';
+          greenLedState = 'ON';
         } else {
           simulatedServoAngle = 0;
-          simulatedDoorState = 'CLOSED';
-          simulatedReedSwitch = 'CLOSED';
+          commandedDoorState = 'CLOSED';
+          redLedState = 'ON';
+          greenLedState = 'OFF';
         }
 
         isActuating = false;
-        log('SERVO', `Actuation complete: Angle=${simulatedServoAngle}°, State=${simulatedDoorState}`, green);
+        log('SERVO', `Rotation complete! Servo=${simulatedServoAngle}°, Commanded=${commandedDoorState}`, green);
 
-        // Acknowledge command completion
-        const ackRes = await apiRequest(`/api/hardware/commands/${cmd.id}/ack`, 'POST', {
+        // Acknowledge command execution
+        const ackPayload = {
+          commandId: cmd.id,
+          controllerId,
           status: 'SUCCESS',
           servoAngle: simulatedServoAngle,
-          observedState: simulatedDoorState
-        });
+          commandedState: commandedDoorState
+        };
 
+        const ackRes = await apiRequest(`/api/hardware/commands/${cmd.id}/ack`, 'POST', ackPayload);
         if (ackRes.ok) {
-          log('ACK', `Command ${cmd.id} acknowledged`, green);
+          log('ACK', `Command ${cmd.id} acknowledged successfully`, green);
+        } else {
+          log('ACK', `Failed to acknowledge command: ${ackRes.status}`, red);
         }
-
-        // Report state change event
-        await reportEvent('PHYSICAL_DOOR_STATE_CHANGED', {
-          doorId: 'DOOR-A101-PHYSICAL',
-          reedState: simulatedReedSwitch,
-          servoAngle: simulatedServoAngle,
-          triggeredBy: 'SERVO_ACTUATION'
-        });
       }, 350);
     }
   }
 }
 
-// 4. Present Simulated RFID Card
-async function scanRfidCard(cardId, description) {
-  log('RFID', `Presenting badge [${cardId}] (${description}) to RC522 reader...`, magenta);
+// 4. RFID Badge Scan Simulation
+async function simulateRfidScan(cardUid) {
+  log('RFID', `Presenting card UID: ${cardUid} to RC522 reader...`, magenta);
 
-  const res = await apiRequest('/api/hardware/rfid/scan', 'POST', {
-    cardId,
-    uid: cardId,
+  const scanPayload = {
+    cardUid,
     readerId: 'RFID-RC522-01',
-    location: 'Cell Block A (A-101)'
-  });
+    location: 'Cell Block A (A-101 Physical Prototype)'
+  };
 
+  const res = await apiRequest('/api/hardware/rfid/scan', 'POST', scanPayload);
   if (res.ok && res.data) {
-    const { accessGranted, decision, reason, holder } = res.data;
-    if (accessGranted) {
-      log('ACCESS', `ACCESS GRANTED! Authorized for ${holder?.name || 'Staff'}. Opening door.`, green);
-      // Auto open door
+    const granted = res.data.granted || res.data.accessGranted;
+    const holder = res.data.holder?.name || res.data.personName || 'Unknown';
+    if (granted) {
+      log('RFID', `Access GRANTED for ${holder}! Rotating servo to 90° (Green LED ON)`, green);
+      commandedDoorState = 'OPEN';
       simulatedServoAngle = 90;
-      simulatedDoorState = 'OPEN';
-      simulatedReedSwitch = 'OPEN';
-      await reportEvent('PHYSICAL_DOOR_STATE_CHANGED', {
-        doorId: 'DOOR-A101-PHYSICAL',
-        reedState: 'OPEN',
-        servoAngle: 90,
-        triggeredBy: 'RFID_ACCESS_GRANTED'
-      });
+      greenLedState = 'ON';
+      redLedState = 'OFF';
+
+      // Auto close after 4 seconds
+      setTimeout(() => {
+        if (running && commandedDoorState === 'OPEN') {
+          log('ACTUATOR', 'Auto-close interval elapsed. Restoring door to CLOSED (0°)', yellow);
+          commandedDoorState = 'CLOSED';
+          simulatedServoAngle = 0;
+          greenLedState = 'OFF';
+          redLedState = 'ON';
+          sendHeartbeat();
+        }
+      }, 4000);
     } else {
-      log('ACCESS', `ACCESS DENIED! Decision: ${decision} (${reason})`, red);
+      log('RFID', `Access DENIED (${res.data.reason || 'Unauthorized UID'}). Flashing Red LED.`, red);
     }
   } else {
     log('RFID', `Scan failed: ${res.error || res.status}`, red);
   }
 }
 
-// Banner & CLI Initialization
-console.log(`
-${cyan}${bold}=================================================================
-  PrisonGuard — ESP32 Cell Door Hardware Simulator
-=================================================================${reset}
-  Controller ID:  ${bold}${controllerId}${reset}
-  Target Backend: ${bold}${serverUrl}${reset}
-  Simulated Door: ${bold}DOOR-A101-PHYSICAL${reset} (Bound to software DOOR-A101)
+// Banner
+console.log('\n=================================================================');
+console.log('  🛡️  PrisonGuard — ESP32 Physical Door Hardware Simulator');
+console.log('=================================================================');
+console.log(`  Controller ID:  ${cyan}${controllerId}${reset}`);
+console.log(`  Target Backend: ${cyan}${serverUrl}${reset}`);
+console.log(`  Hardware BOM:   SG90 Servo (GPIO 13), LEDs (25, 26), RC522 SPI`);
+console.log('\n  Interactive keys:');
+console.log('    [o] + Enter : Command door OPEN (Servo = 90°, Green LED)');
+console.log('    [c] + Enter : Command door CLOSED (Servo = 0°, Red LED)');
+console.log('    [s] + Enter : Scan Authorized Officer Badge (CARD-OFC-514)');
+console.log('    [r] + Enter : Scan Revoked Badge (CARD-REVOKED-999)');
+console.log('    [u] + Enter : Scan Unknown Card (CARD-UNKNOWN-777)');
+console.log('    [h] + Enter : Force instant Heartbeat');
+console.log('    [q] + Enter : Quit');
+console.log('=================================================================\n');
 
-  Interactive keys:
-    [o] + Enter : Manually open physical door (Reed = OPEN)
-    [c] + Enter : Manually close physical door (Reed = CLOSED)
-    [s] + Enter : Scan Authorized Officer Badge (CARD-OFC-514)
-    [r] + Enter : Scan Revoked Badge (CARD-REVOKED-999)
-    [h] + Enter : Force instant Heartbeat
-    [q] + Enter : Quit
-=================================================================
-`);
+// Start Intervals
+sendHeartbeat();
+const heartbeatInterval = setInterval(sendHeartbeat, 5000);
+const pollInterval = setInterval(pollCommands, 500);
 
-// Interactive Readline
+// CLI Interaction
 const rl = readline.createInterface({
   input: process.stdin,
-  output: process.stdout,
-  terminal: false
+  output: process.stdout
 });
 
 rl.on('line', async (line) => {
-  const input = line.trim().toLowerCase();
-  switch (input) {
+  const cmd = line.trim().toLowerCase();
+  switch (cmd) {
     case 'o':
-      simulatedDoorState = 'OPEN';
-      simulatedReedSwitch = 'OPEN';
-      log('MANUAL', 'Physical door opened manually. Reed switch triggered: OPEN', yellow);
-      await reportEvent('PHYSICAL_DOOR_STATE_CHANGED', {
-        doorId: 'DOOR-A101-PHYSICAL',
-        reedState: 'OPEN',
-        servoAngle: simulatedServoAngle,
-        triggeredBy: 'MANUAL_PHYSICAL_DISPLACEMENT'
-      });
+      log('MANUAL', 'Commanding door OPEN (90°)', yellow);
+      simulatedServoAngle = 90;
+      commandedDoorState = 'OPEN';
+      greenLedState = 'ON';
+      redLedState = 'OFF';
+      await reportEvent('DOOR_STATE_CHANGED', { state: 'OPEN', angle: 90 });
+      await sendHeartbeat();
       break;
-
     case 'c':
-      simulatedDoorState = 'CLOSED';
-      simulatedReedSwitch = 'CLOSED';
-      log('MANUAL', 'Physical door closed manually. Reed switch triggered: CLOSED', yellow);
-      await reportEvent('PHYSICAL_DOOR_STATE_CHANGED', {
-        doorId: 'DOOR-A101-PHYSICAL',
-        reedState: 'CLOSED',
-        servoAngle: simulatedServoAngle,
-        triggeredBy: 'MANUAL_PHYSICAL_DISPLACEMENT'
-      });
+      log('MANUAL', 'Commanding door CLOSED (0°)', yellow);
+      simulatedServoAngle = 0;
+      commandedDoorState = 'CLOSED';
+      greenLedState = 'OFF';
+      redLedState = 'ON';
+      await reportEvent('DOOR_STATE_CHANGED', { state: 'CLOSED', angle: 0 });
+      await sendHeartbeat();
       break;
-
     case 's':
-      await scanRfidCard('CARD-OFC-514', 'Officer J. Miller');
+      await simulateRfidScan('CARD-OFC-514');
       break;
-
     case 'r':
-      await scanRfidCard('CARD-REVOKED-999', 'Revoked Security Badge');
+      await simulateRfidScan('CARD-REVOKED-999');
       break;
-
+    case 'u':
+      await simulateRfidScan('CARD-UNKNOWN-777');
+      break;
     case 'h':
       await sendHeartbeat();
       break;
-
     case 'q':
-      log('SHUTDOWN', 'Stopping simulated ESP32 controller...', yellow);
+      log('SYSTEM', 'Shutting down simulated ESP32 controller...', yellow);
       running = false;
+      clearInterval(heartbeatInterval);
+      clearInterval(pollInterval);
       rl.close();
       process.exit(0);
       break;
-
     default:
-      console.log('Commands: [o]pen, [c]lose, [s]can valid badge, [r]evoked badge, [h]eartbeat, [q]uit');
+      console.log('Unrecognized key. Available: [o]pen, [c]lose, [s]can officer, [r]evoked card, [u]nknown card, [h]eartbeat, [q]uit');
   }
-});
-
-// Periodic Timers
-sendHeartbeat();
-const heartbeatTimer = setInterval(() => {
-  if (running) sendHeartbeat();
-}, 4000);
-
-const pollTimer = setInterval(() => {
-  if (running) pollCommands();
-}, 1000);
-
-process.on('SIGINT', () => {
-  log('SHUTDOWN', 'Exiting simulator.', yellow);
-  clearInterval(heartbeatTimer);
-  clearInterval(pollTimer);
-  process.exit(0);
 });

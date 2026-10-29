@@ -99,6 +99,35 @@ npm run build:simulator  # Output: apps/simulator/dist
 
 ---
 
+## 🛠️ ESP32 Physical Hardware Integration (Cell A-101 Prototype)
+
+PrisonGuard features an optional, decoupled physical hardware integration layer that binds an **ESP32 DevKit V1** microcontroller to Cell A-101.
+
+### Physical Bill of Materials (Strictly Compliant)
+* **ESP32 DevKit V1** (Wi-Fi + Bluetooth)
+* **Tower Pro SG90 9g Micro Servo** (Actuates 0° closed to 90° open) $\rightarrow$ **GPIO 13**
+* **RC522 13.56 MHz RFID Reader** $\rightarrow$ SPI: SS (**GPIO 5**), SCK (**18**), MOSI (**23**), MISO (**19**), RST (**22**), Power: **3.3V ONLY**
+* **Red Indicator LED** (Locked / Access Denied) $\rightarrow$ **GPIO 25** via 220Ω resistor
+* **Green Indicator LED** (Commanded Open / Access Granted) $\rightarrow$ **GPIO 26** via 220Ω resistor
+* *Notice:* No buzzer, speaker, motor driver, physical cell door, or reed switch sensor is used. Servo position represents an authoritative **commanded state** (position unverified).
+
+### Non-Blocking Architecture & Fail-Closed Security
+* **Decoupled Operation:** The software simulation operates 100% non-blocking. If the ESP32 is powered off or disconnected, the simulator continues normal execution without latency or failure.
+* **Fail-Closed Policy:** If the microcontroller drops Wi-Fi or cannot reach the backend, it strictly denies all RFID access requests.
+* **Idempotent Commands:** Prevents duplicate servo actuation on retries.
+
+### Running the Hardware Simulator or Physical Firmware
+1. **Software Mock Controller:**
+   ```bash
+   node server/scripts/simulate-esp32.js
+   ```
+2. **Physical ESP32 Firmware:**
+   * Open `firmware/esp32-door-controller/esp32-door-controller.ino` in Arduino IDE.
+   * Copy `config.h.example` to `config.h` and configure Wi-Fi and backend URL.
+   * Upload to ESP32 Dev Module.
+
+---
+
 ## 🌐 Environment Variables Summary
 
 ### Backend (`server/.env`)

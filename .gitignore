@@ -45,3 +45,7 @@ Thumbs.db
 
 # AI Assistant & internal workspace metadata
 .gemini/
+
+# Firmware local secrets
+firmware/**/config.h
+!firmware/**/config.h.example

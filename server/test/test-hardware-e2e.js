@@ -5,12 +5,14 @@
  * Tests the complete lifecycle:
  * 1. Boot authoritative backend server
  * 2. Connect client WebSocket simulating Admin website
- * 3. Enable hardware integration & bidirectional sync
+ * 3. Enable hardware integration & configure device identity
  * 4. Connect simulated ESP32 controller via HTTP heartbeat & polling
  * 5. Send door command from Admin website -> Queued -> Polled by ESP32 -> Actuated -> Acknowledged -> Received by Admin via WebSocket
- * 6. Simulate physical Reed Switch change on ESP32 -> Synced to simulation engine -> Reflected to web clients
- * 7. Simulate contactless RFID card swipe -> Evaluated -> Event broadcasted
- * 8. Verify non-blocking operation & disconnect watchdog
+ * 6. Verify distinct command lifecycle states (REQUEST_ACCEPTED, COMMAND_DELIVERED, COMMAND_EXECUTED)
+ * 7. Verify commanded state vs unverified physical position
+ * 8. Simulate authorized & unauthorized RFID card presentation (fail-closed check)
+ * 9. Retrieve and verify recent RFID access results
+ * 10. Verify non-blocking operation & disconnect resilience
  * ==============================================================================
  */
 
@@ -38,6 +40,7 @@ async function runE2E() {
   const port = server.address().port;
   const baseUrl = `http://127.0.0.1:${port}`;
   const deviceToken = process.env.HARDWARE_DEVICE_TOKEN || 'pg-hw-secret-token-esp32-demo';
+  const controllerId = 'CELL-01-PHYSICAL';
 
   try {
     // 1. Authenticate admin user
@@ -87,19 +90,33 @@ async function runE2E() {
     const syncData = await syncRes.json();
     assert(syncData.success && syncData.hardware.syncHardwareToSimulation === true, 'Bidirectional physical sync enabled');
 
-    // 4. ESP32 Controller sends heartbeat check-in
+    // 4. Configure device identity and registration metadata
+    const configRes = await fetch(`${baseUrl}/api/hardware/device/configure`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        controllerId,
+        displayName: 'Cell A-101 Physical Door Controller Prototype',
+        targetDoorId: 'DOOR-A101'
+      })
+    });
+    const configData = await configRes.json();
+    assert(configData.success && configData.hardware.controllerId === controllerId, 'Device configured with unique ID CELL-01-PHYSICAL');
+
+    // 5. ESP32 Controller sends heartbeat check-in
     const heartbeatRes = await fetch(`${baseUrl}/api/hardware/heartbeat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-Device-Token': deviceToken,
-        'X-Controller-Id': 'ESP32-CELL-01'
+        'X-Controller-Id': controllerId
       },
       body: JSON.stringify({
-        controllerId: 'ESP32-CELL-01',
+        controllerId,
         doorState: 'CLOSED',
+        commandedState: 'CLOSED',
         servoAngle: 0,
-        reedSwitch: 'CLOSED',
+        positionVerified: false,
         uptimeSeconds: 30,
         isSimulated: true
       })
@@ -110,9 +127,9 @@ async function runE2E() {
     // Wait a brief moment for socket state broadcast
     await new Promise(r => setTimeout(r, 100));
     assert(receivedHardwareState?.connectionStatus === 'CONNECTED', 'Admin website received live hardware state update via WebSocket');
+    assert(receivedHardwareState?.physicalPositionVerified === false, 'Physical position explicitly marked unverified (commanded state only)');
 
-    // 5. Admin operates door DOOR-A101 -> Non-blocking command queued for ESP32
-    // Unlock door first
+    // 6. Admin operates door DOOR-A101 -> Non-blocking command queued for ESP32
     await fetch(`${baseUrl}/api/doors/DOOR-A101/lock`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -127,55 +144,39 @@ async function runE2E() {
     const doorOpData = await doorOpRes.json();
     assert(doorOpData.success, 'Door operate dispatched from website (non-blocking)');
 
-    // 6. ESP32 polls commands and executes
-    const pollRes = await fetch(`${baseUrl}/api/hardware/commands/poll`, {
-      headers: { 'X-Device-Token': deviceToken, 'X-Controller-Id': 'ESP32-CELL-01' }
+    // 7. ESP32 polls commands and executes
+    const pollRes = await fetch(`${baseUrl}/api/hardware/commands/poll?controllerId=${controllerId}`, {
+      headers: { 'X-Device-Token': deviceToken, 'X-Controller-Id': controllerId }
     });
     const pollData = await pollRes.json();
     assert(pollData.hasCommand && pollData.command?.payload?.action === 'OPEN', 'ESP32 controller polled queued OPEN command');
 
-    // 7. ESP32 acknowledges command
+    // 8. ESP32 acknowledges command
     const cmdId = pollData.command.id;
     const ackRes = await fetch(`${baseUrl}/api/hardware/commands/${cmdId}/ack`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-Device-Token': deviceToken,
-        'X-Controller-Id': 'ESP32-CELL-01'
+        'X-Controller-Id': controllerId
       },
       body: JSON.stringify({
         status: 'SUCCESS',
         servoAngle: 90,
-        observedState: 'OPEN'
+        commandedState: 'OPEN'
       })
     });
     const ackData = await ackRes.json();
     assert(ackData.success && ackData.command?.status === 'ACKNOWLEDGED', 'ESP32 command acknowledgement confirmed');
+    assert(ackData.command?.lifecycleStage === 'COMMAND_EXECUTED', 'Command transitioned to COMMAND_EXECUTED lifecycle');
 
-    // 8. Physical Reed Switch displacement triggers physical state change event
-    const reedEventRes = await fetch(`${baseUrl}/api/hardware/events`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Device-Token': deviceToken,
-        'X-Controller-Id': 'ESP32-CELL-01'
-      },
-      body: JSON.stringify({
-        type: 'PHYSICAL_DOOR_STATE_CHANGED',
-        controllerId: 'ESP32-CELL-01',
-        details: { doorId: 'DOOR-A101-PHYSICAL', reedState: 'CLOSED', servoAngle: 0 }
-      })
-    });
-    const reedEventData = await reedEventRes.json();
-    assert(reedEventData.success, 'Physical reed event accepted from ESP32');
-
-    // 9. Contactless RFID badge verification
+    // 9. Contactless RFID badge verification: Authorized Officer
     const rfidRes = await fetch(`${baseUrl}/api/hardware/rfid/scan`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-Device-Token': deviceToken,
-        'X-Controller-Id': 'ESP32-CELL-01'
+        'X-Controller-Id': controllerId
       },
       body: JSON.stringify({
         uid: 'CARD-OFC-514',
@@ -186,6 +187,30 @@ async function runE2E() {
     });
     const rfidData = await rfidRes.json();
     assert(rfidData.accessGranted === true && rfidData.holder?.role === 'OFFICER', 'Physical RFID scan authenticated for Officer J. Miller');
+
+    // 10. Contactless RFID badge verification: Unauthorized Unknown Card (Fail Closed)
+    const badRfidRes = await fetch(`${baseUrl}/api/hardware/rfid/scan`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Device-Token': deviceToken,
+        'X-Controller-Id': controllerId
+      },
+      body: JSON.stringify({
+        uid: 'CARD-UNKNOWN-777',
+        readerId: 'RFID-RC522-01',
+        location: 'Cell Block A (A-101)'
+      })
+    });
+    const badRfidData = await badRfidRes.json();
+    assert(badRfidData.accessGranted === false && badRfidData.decision === 'DENIED_UNKNOWN_CARD', 'Unregistered RFID scan safely rejected (fail closed)');
+
+    // 11. Retrieve recent RFID scans from dedicated endpoint
+    const recentScansRes = await fetch(`${baseUrl}/api/hardware/rfid/recent`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const recentScansData = await recentScansRes.json();
+    assert(recentScansData.success && recentScansData.scans.length >= 2, 'Recent RFID scans list successfully queried');
 
     // Clean up
     adminSocket.disconnect();
